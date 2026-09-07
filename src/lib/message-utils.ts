@@ -22,6 +22,11 @@ export function shouldRunWebResearch(agentId: BmadAgentId, message: string): boo
   return agentId === "deep-recon" && !isCasualMessage(message);
 }
 
+/** Run market research to inform the panel on any substantive idea message. */
+export function shouldRunPanelResearch(message: string): boolean {
+  return !isCasualMessage(message) && message.trim().length >= 20;
+}
+
 export function casualReply(agentId: BmadAgentId): string {
   if (agentId === "honesty-coach") {
     return `Hey! I'm the **Honesty Coach**. Share an app or business idea and I'll break down how grounded your claims are — six dimensions, no single overall score.

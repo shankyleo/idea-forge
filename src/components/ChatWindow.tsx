@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Send, Sparkles, AlertCircle, Wand2, Brain, Lightbulb, Link2 } from "lucide-react";
-import type { AgentInfo, BmadAgentId, ChatMessage, DepthScore, HonestyBreakdown } from "@/lib/types";
+import { Send, Sparkles, AlertCircle, Wand2 } from "lucide-react";
+import type { AgentInfo, BmadAgentId, ChatMessage, DepthScore, HonestyBreakdown, SimilarIdeaNudge } from "@/lib/types";
 import { HonestyBreakdownCard } from "@/components/HonestyBreakdownCard";
 import { DepthBadge } from "@/components/DepthBadge";
 import { RelatedIdeas } from "@/components/IdeaSidebar";
 import { getAgent } from "@/lib/bmad/agents";
+import { AgentIcon } from "@/components/AgentIcon";
 import {
   MarkdownContent,
   PerspectiveCards,
@@ -18,22 +19,20 @@ const CHAT_TIMEOUT_MS = 90_000;
 
 interface ChatWindowProps {
   sessionId: string;
-  activeIdeaId?: string;
-  ideaTitle?: string;
   agents: AgentInfo[];
   cursorApiConfigured: boolean;
   onIdeasUpdated: () => void;
   onSessionActivity?: () => void;
+  onContinueSimilarChat?: (sessionId: string) => void;
 }
 
 export function ChatWindow({
   sessionId,
-  activeIdeaId,
-  ideaTitle,
   agents,
   cursorApiConfigured,
   onIdeasUpdated,
   onSessionActivity,
+  onContinueSimilarChat,
 }: ChatWindowProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -51,19 +50,17 @@ export function ChatWindow({
   const [lastRelated, setLastRelated] = useState<
     Array<{ id: string; title: string; score: number; reason: string }>
   >([]);
+  const [similarNudge, setSimilarNudge] = useState<SimilarIdeaNudge | null>(null);
+  const [ideaHonesty, setIdeaHonesty] = useState<HonestyBreakdown | null>(null);
+  const [ideaHonestyDelta, setIdeaHonestyDelta] = useState<number | undefined>();
+  const [panelPerspectives, setPanelPerspectives] = useState<AgentPerspective[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const loadMessages = useCallback(async () => {
-    if (activeIdeaId) {
-      const res = await fetch(`/api/ideas?id=${activeIdeaId}`);
-      const data = await res.json();
-      setMessages(data.thread ?? []);
-      return;
-    }
     const res = await fetch(`/api/sessions?id=${sessionId}`);
     const data = await res.json();
     setMessages(data.messages ?? []);
-  }, [sessionId, activeIdeaId]);
+  }, [sessionId]);
 
   useEffect(() => {
     loadMessages();
@@ -113,6 +110,8 @@ export function ChatWindow({
     setStreamingForgeActions(false);
     setLastDepth(null);
     setLastRelated([]);
+    setSimilarNudge(null);
+    setPanelPerspectives([]);
 
     const optimisticUser: ChatMessage = {
       id: `temp-${Date.now()}`,
@@ -138,7 +137,6 @@ export function ChatWindow({
         body: JSON.stringify({
           sessionId,
           message: text,
-          activeIdeaId: activeIdeaId ?? undefined,
         }),
         signal: controller.signal,
       });
@@ -177,6 +175,11 @@ export function ChatWindow({
             );
           } else if (payload.type === "status") {
             setStatusLine(payload.message as string);
+          } else if (payload.type === "perspectives") {
+            const p = payload.perspectives as AgentPerspective[];
+            responsePerspectives = p;
+            setPanelPerspectives(p);
+            setStreamingPerspectives(p);
           } else if (payload.type === "meta") {
             assistantMsgId = (payload.assistantMessageId as string) ?? "";
             setStatusLine(null);
@@ -196,7 +199,16 @@ export function ChatWindow({
               );
               if (payload.depthScore) setLastDepth(payload.depthScore as DepthScore);
               setLastRelated((payload.relatedIdeas as typeof lastRelated) ?? []);
-              if (payload.perspectives) {
+              if (payload.similarIdeaNudge) {
+                setSimilarNudge(payload.similarIdeaNudge as SimilarIdeaNudge);
+              }
+              if (payload.ideaHonesty) {
+                setIdeaHonesty(payload.ideaHonesty as HonestyBreakdown);
+              }
+              if (typeof payload.ideaHonestyDelta === "number") {
+                setIdeaHonestyDelta(payload.ideaHonestyDelta as number);
+              }
+              if (payload.perspectives && !responsePerspectives.length) {
                 responsePerspectives = payload.perspectives as AgentPerspective[];
                 setStreamingPerspectives(responsePerspectives);
               }
@@ -211,6 +223,9 @@ export function ChatWindow({
             setStreamingContent(assistantContent);
           } else if (payload.type === "done") {
             doneReceived = true;
+            if (payload.ideaHonesty) {
+              setIdeaHonesty(payload.ideaHonesty as HonestyBreakdown);
+            }
             setMessages((prev) => [
               ...prev,
               {
@@ -229,6 +244,7 @@ export function ChatWindow({
             setStreamingContent("");
             setStreamingAgentId(null);
             setStreamingPerspectives([]);
+            setPanelPerspectives([]);
             setStreamingForgeActions(false);
             onIdeasUpdated();
             onSessionActivity?.();
@@ -267,15 +283,11 @@ export function ChatWindow({
       setActiveRoute(null);
       setStreamingContent("");
       setStreamingAgentId(null);
+      setPanelPerspectives([]);
     }
   };
 
   const routedAgentInfo = activeRoute ? getAgent(activeRoute.agentId) : null;
-
-  const ideaIdsInThread = new Set(
-    messages.map((m) => m.ideaId).filter((id): id is string => Boolean(id))
-  );
-  const isGroupThread = Boolean(activeIdeaId) && ideaIdsInThread.size > 1;
 
   return (
     <div className="flex h-full flex-col">
@@ -303,35 +315,41 @@ export function ChatWindow({
             className="mt-2 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs"
             style={{ borderColor: `${routedAgentInfo.color}55`, color: routedAgentInfo.color }}
           >
+            <AgentIcon agentId={routedAgentInfo.id} className="h-5 w-5" color={routedAgentInfo.color} />
             <span className="font-semibold">{routedAgentInfo.name}</span>
             <span className="text-zinc-500">· {activeRoute.reason}</span>
           </div>
         )}
-        {activeIdeaId && ideaTitle && (
-          <div className="mt-2 flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-100/90">
-            {isGroupThread ? (
-              <>
-                <Link2 className="h-3.5 w-3.5 shrink-0 text-amber-400" />
-                <span>
-                  Connected memory thread — {ideaIdsInThread.size} related ideas (including{" "}
-                  <strong className="font-medium">{ideaTitle}</strong>) woven into one storyboard,
-                  in order. Each section below is labeled by idea.
-                </span>
-              </>
-            ) : (
-              <>
-                <Brain className="h-3.5 w-3.5 shrink-0 text-amber-400" />
-                <span>
-                  Memory thread for <strong className="font-medium">{ideaTitle}</strong> — all past
-                  messages about this idea across conversations
-                </span>
-              </>
-            )}
+        {ideaHonesty && (
+          <div className="mt-2">
+            <HonestyBreakdownCard
+              breakdown={ideaHonesty}
+              compact
+              delta={ideaHonestyDelta}
+            />
           </div>
         )}
       </header>
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
+        {similarNudge && (
+          <div className="mx-auto mb-4 max-w-3xl rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-4 py-3 text-sm text-indigo-100">
+            <p>
+              This sounds like an idea you explored before:{" "}
+              <strong>{similarNudge.title}</strong>.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                onContinueSimilarChat?.(similarNudge.sessionId);
+                setSimilarNudge(null);
+              }}
+              className="mt-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500"
+            >
+              Continue that chat
+            </button>
+          </div>
+        )}
         {messages.length === 0 && !streamingContent && (
           <div className="mx-auto max-w-xl pt-12 text-center">
             <p className="text-zinc-400">
@@ -341,43 +359,28 @@ export function ChatWindow({
             <p className="mt-2 text-xs text-zinc-600">
               No agent picker needed. Describe an idea, react to feedback, or ask what&apos;s missing.
             </p>
+            {agents.length > 0 && (
+              <div className="mt-8 grid grid-cols-2 gap-2 text-left sm:grid-cols-3">
+                {agents.map((agent) => (
+                  <div
+                    key={agent.id}
+                    className="flex items-start gap-2 rounded-xl border border-zinc-800/80 bg-zinc-900/40 px-3 py-2.5"
+                  >
+                    <AgentIcon agentId={agent.id} className="h-9 w-9 shrink-0" color={agent.color} />
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-semibold text-zinc-200">{agent.name}</p>
+                      <p className="truncate text-[10px] text-zinc-500">{agent.persona}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
         <div className="mx-auto max-w-3xl space-y-4">
-          {messages.map((msg, index) => {
-            const prev = messages[index - 1];
-            const showIdeaBreak =
-              isGroupThread &&
-              msg.ideaTitle &&
-              (!prev || prev.ideaId !== msg.ideaId);
-            const showSessionBreak =
-              activeIdeaId &&
-              !showIdeaBreak &&
-              msg.sessionTitle &&
-              (!prev || prev.sessionId !== msg.sessionId);
-
-            return (
+          {messages.map((msg) => (
               <div key={msg.id} className="space-y-2">
-                {showIdeaBreak && (
-                  <div className="flex items-center gap-2 py-2">
-                    <div className="h-px flex-1 bg-amber-500/20" />
-                    <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/25 bg-amber-500/10 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-200/90">
-                      <Lightbulb className="h-3 w-3 text-amber-400/90" />
-                      {msg.ideaTitle}
-                    </span>
-                    <div className="h-px flex-1 bg-amber-500/20" />
-                  </div>
-                )}
-                {showSessionBreak && (
-                  <div className="flex items-center gap-2 py-1">
-                    <div className="h-px flex-1 bg-zinc-800" />
-                    <span className="text-[10px] uppercase tracking-wide text-zinc-600">
-                      {msg.sessionTitle}
-                    </span>
-                    <div className="h-px flex-1 bg-zinc-800" />
-                  </div>
-                )}
                 <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                   <div
                     className={`max-w-[85%] rounded-2xl px-4 py-3 ${
@@ -388,7 +391,12 @@ export function ChatWindow({
                   >
                     {msg.role === "assistant" && msg.agentId && (
                       <div className="mb-1 space-y-0.5">
-                        <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+                        <div className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+                          <AgentIcon
+                            agentId={msg.agentId}
+                            className="h-4 w-4"
+                            color={getAgent(msg.agentId).color}
+                          />
                           {getAgent(msg.agentId).name}
                         </div>
                         {msg.routeReason && (
@@ -422,19 +430,38 @@ export function ChatWindow({
                     )}
                     {msg.relatedIdeas && msg.relatedIdeas.length > 0 && (
                       <div className="mt-2">
-                        <RelatedIdeas related={msg.relatedIdeas} />
+                        <RelatedIdeas
+                          related={msg.relatedIdeas}
+                          onContinue={(id) => {
+                            void fetch(`/api/sessions?ideaId=${id}`)
+                              .then((r) => r.json())
+                              .then((d) => {
+                                if (d.session?.id) onContinueSimilarChat?.(d.session.id);
+                              });
+                          }}
+                        />
                       </div>
                     )}
                   </div>
                 </div>
               </div>
-            );
-          })}
+          ))}
+
+          {panelPerspectives.length > 0 && loading && !streamingContent && (
+            <div className="mx-auto max-w-3xl">
+              <PerspectiveCards perspectives={panelPerspectives} />
+            </div>
+          )}
 
           {streamingContent && streamingAgentId && (
             <div className="flex justify-start">
               <div className="max-w-[85%] rounded-2xl bg-zinc-800/60 px-4 py-3 ring-1 ring-zinc-700/50">
-                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+                <div className="mb-1 inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+                  <AgentIcon
+                    agentId={streamingAgentId}
+                    className="h-4 w-4"
+                    color={getAgent(streamingAgentId).color}
+                  />
                   {getAgent(streamingAgentId).name}
                 </div>
                 <MarkdownContent content={streamingContent} />
@@ -476,11 +503,7 @@ export function ChatWindow({
                 sendMessage();
               }
             }}
-            placeholder={
-              activeIdeaId
-                ? `Continue thinking on "${ideaTitle?.slice(0, 40) ?? "this idea"}"...`
-                : "Type anything — an idea, feedback, a question, pushback on what you heard..."
-            }
+            placeholder="Type anything — a new angle, a thought to validate, pushback, or a question for the team..."
             rows={2}
             className="flex-1 resize-none rounded-xl border border-zinc-700 bg-zinc-900/80 px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-indigo-500/50 focus:outline-none focus:ring-1 focus:ring-indigo-500/30"
             disabled={loading}

@@ -6,6 +6,8 @@ import {
   getAllIdeaLinks,
   getRelatedIdeasForIdea,
   getMessagesForIdeaGroup,
+  listAllIdeaThoughts,
+  getThoughtsForIdea,
 } from "@/lib/db";
 import { buildIdeaGroups, buildIdeaGraph } from "@/lib/idea-groups";
 
@@ -19,7 +21,8 @@ export async function GET(request: Request) {
     const ideas = listIdeas();
     const links = getAllIdeaLinks();
     const { nodes, edges } = buildIdeaGraph(ideas, links);
-    return NextResponse.json({ nodes, edges });
+    const thoughts = listAllIdeaThoughts();
+    return NextResponse.json({ nodes, edges, thoughts });
   }
 
   if (id) {
@@ -28,7 +31,8 @@ export async function GET(request: Request) {
     const links = getIdeaLinks(id);
     const related = getRelatedIdeasForIdea(id);
     const thread = getMessagesForIdeaGroup(id);
-    return NextResponse.json({ idea, links, related, thread });
+    const thoughts = getThoughtsForIdea(id);
+    return NextResponse.json({ idea, links, related, thread, thoughts });
   }
 
   const ideas = listIdeas();

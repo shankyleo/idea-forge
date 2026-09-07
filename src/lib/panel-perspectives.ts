@@ -1,4 +1,4 @@
-import type { BmadAgentId, DepthScore, AgentPerspective, HonestyBreakdown } from "@/lib/types";
+import type { BmadAgentId, DepthScore, AgentPerspective } from "@/lib/types";
 import { getAgent } from "@/lib/bmad/agents";
 import type { DeepReconResult } from "@/lib/web-research";
 
@@ -24,58 +24,64 @@ export function generatePerspectives(input: {
   depthScore?: DepthScore;
   recon?: Pick<DeepReconResult, "findings" | "depth">;
   primaryAgentId?: BmadAgentId;
-  honesty?: HonestyBreakdown;
 }): AgentPerspective[] {
-  const { message, depthScore, recon, honesty } = input;
+  const { message, depthScore, recon } = input;
   const competition = depthScore?.competitionLevel ?? recon?.depth.competitionLevel ?? "unknown";
-  const score = depthScore?.overall ?? recon?.depth.depthScore ?? 50;
+  const score = depthScore?.overall ?? recon?.depth.depthScore;
   const topCompetitors = (recon?.findings ?? []).slice(0, 3).map((f) => f.title);
 
   const topic = toTopic(message);
   const rival = topCompetitors[0] ?? "the incumbents";
   const second = topCompetitors[1];
 
-  // Use the honesty breakdown to make each take specific to *this* input.
-  const dims = honesty?.dimensions ?? [];
-  const weakest = [...dims].sort((a, b) => a.score - b.score)[0];
-  const topFlag = honesty?.flags?.[0];
+  const boldClaim =
+    message.match(
+      /\b(definitely|guaranteed|no competition|everyone will|can't fail|obviously|100%|revolutionary)\b/i
+    )?.[0] ?? null;
 
   const forge = getAgent("forge");
   const reviewer = getAgent("red-team");
   const victor = getAgent("innovation");
   const maya = getAgent("design-thinking");
 
+  const depthLine =
+    score != null
+      ? score < 45
+        ? `**"${topic}"** looks crowded or still fuzzy (${score}/100 depth).`
+        : competition === "high"
+          ? `**"${topic}"** has real signal but a crowded field (${score}/100). Your risk isn't "no market" — it's **me-too positioning**.`
+          : `**"${topic}"** has room to run (${score}/100) — so I want a kill test before you commit.`
+      : `**"${topic}"** needs sharper framing before I'd bet on it — what's the one sentence a skeptical user would believe?`;
+
   const forgeContent = [
-    score < 45
-      ? `**"${topic}"** looks crowded or still fuzzy (${score}/100 depth).`
-      : competition === "high"
-        ? `**"${topic}"** has real signal but a crowded field (${score}/100). Your risk isn't "no market" — it's **me-too positioning**.`
-        : `**"${topic}"** has room to run (${score}/100) — so I want a kill test before you commit.`,
-    topFlag
-      ? `The claim I'd attack first: *${topFlag}*`
-      : `Name **one real person** who tried to solve this in the last 30 days — not a hypothetical.`,
-    `**What single piece of evidence would make you abandon this in 30 days?**`,
+    depthLine,
+    boldClaim
+      ? `I'd push back on *"${boldClaim}"* — that's assertion without proof. Either find a signal or narrow the claim.`
+      : `The idea is directionally interesting but still unproven — I'd want one real user story before committing.`,
+    score != null && score >= 55
+      ? `**Verdict:** worth a focused experiment, not a full build yet.`
+      : `**Verdict:** refine or kill unless you can name a wedge in 48 hours.`,
   ].join(" ");
 
   const reviewerContent = [
-    weakest
-      ? `Your weakest link is **${weakest.label.toLowerCase()}** (${weakest.score}/100): ${weakest.note}`
-      : `Biggest gap is a thin evidence base — few concrete signals.`,
     topCompetitors.length > 0
-      ? `Also spell out how you differ from ${[rival, second].filter(Boolean).join(" and ")}.`
-      : `And confirm what people use *instead* today before designing features.`,
-    `Close **one** of these this week with a single customer conversation.`,
+      ? `The gap I see: no clear differentiation from ${[rival, second].filter(Boolean).join(" and ")} yet.`
+      : `The gap I see: thin evidence — no named users, no alternatives mapped, no validation signal.`,
+    message.length < 80
+      ? `The framing is too thin to evaluate — add user, pain, and what exists today.`
+      : `Competition and substitutes aren't spelled out enough to trust the positioning.`,
+    `**Verdict:** ${topCompetitors.length > 0 ? "pivot the wedge, don't broaden scope." : "validate before building."}`,
   ].join(" ");
 
   const victorContent =
     competition === "high"
-      ? `Don't fight ${rival} head-on. Find a **10x wedge** for **"${topic}"** — a narrow vertical, an AI-native workflow, or a bundle incumbents can't ship this quarter. What can only *you* do here?`
-      : `There's space to define the category around **"${topic}"** — but move before someone else owns the story. What's the unfair advantage (distribution, data, or insight) that others can't copy?`;
+      ? `Fighting ${rival} head-on loses. The play is a **10x wedge** for **"${topic}"** — narrow vertical, AI-native workflow, or bundle incumbents can't ship soon.`
+      : `There's whitespace to **own a category narrative** around **"${topic}"** — move before a template shop copies the story.`;
 
   const mayaContent = [
-    `Picture the one person who needs **"${topic}"** most, in the moment right before your product exists.`,
-    `What are they doing *instead* today, and what's the specific frustration in that scene?`,
-    `If you can't describe it in two sentences, the target user isn't concrete enough yet.`,
+    `The user scene isn't concrete yet for **"${topic}"**.`,
+    `I don't see the *moment of frustration* — what's the user doing right before your product, and why do they switch?`,
+    `**Verdict:** ${message.length >= 80 ? "promising pain, needs a sharper persona." : "too vague to trust the target user."}`,
   ].join(" ");
 
   return [

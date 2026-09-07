@@ -3,6 +3,7 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { AgentPerspective } from "@/lib/types";
+import { AgentIcon } from "@/components/AgentIcon";
 import { cn } from "@/lib/utils";
 
 const markdownComponents = {
@@ -62,6 +63,18 @@ const markdownComponents = {
   ),
 };
 
+const perspectiveMarkdownComponents = {
+  p: ({ children }: { children?: React.ReactNode }) => (
+    <p className="text-xs leading-relaxed text-zinc-400 last:mb-0">{children}</p>
+  ),
+  strong: ({ children }: { children?: React.ReactNode }) => (
+    <strong className="font-semibold text-zinc-200">{children}</strong>
+  ),
+  em: ({ children }: { children?: React.ReactNode }) => (
+    <em className="italic text-zinc-300">{children}</em>
+  ),
+};
+
 export function MarkdownContent({ content }: { content: string }) {
   return (
     <div className="prose-invert max-w-none">
@@ -80,20 +93,32 @@ export function PerspectiveCards({ perspectives }: { perspectives: AgentPerspect
       <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
         Panel perspectives
       </p>
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-2">
         {perspectives.map((p) => (
           <div
             key={p.agentId}
-            className="rounded-xl border border-zinc-700/50 bg-zinc-900/50 p-3"
+            className="rounded-xl border border-zinc-700/50 bg-zinc-900/50 p-3.5"
             style={{ borderLeftWidth: 3, borderLeftColor: p.color }}
           >
-            <div className="mb-1 flex items-baseline justify-between gap-2">
-              <span className="text-xs font-semibold" style={{ color: p.color }}>
-                {p.name}
-              </span>
-              <span className="text-[10px] text-zinc-600">{p.role}</span>
+            <div className="mb-2 flex items-start gap-2.5">
+              <AgentIcon agentId={p.agentId} className="h-8 w-8 shrink-0" color={p.color} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-xs font-semibold" style={{ color: p.color }}>
+                    {p.name}
+                  </span>
+                  <span className="shrink-0 text-[10px] text-zinc-600">{p.role}</span>
+                </div>
+                <div className="mt-1.5">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={perspectiveMarkdownComponents}
+                  >
+                    {p.content}
+                  </ReactMarkdown>
+                </div>
+              </div>
             </div>
-            <p className="text-xs leading-relaxed text-zinc-400">{p.content}</p>
           </div>
         ))}
       </div>

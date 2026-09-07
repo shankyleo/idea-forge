@@ -20,10 +20,72 @@ export interface AgentRunOptions {
   recon?: DeepReconResult;
   forgeMode?: "attack" | "defend";
   topicMessage?: string;
+  /** When set, sent as the full user prompt (skips default USER wrapper). */
+  promptOverride?: string;
+  crossChatContext?: string;
 }
 
 export function hasCursorApiKey(): boolean {
   return Boolean(process.env.CURSOR_API_KEY?.trim());
+}
+
+/** Collect a single non-streaming agent response (for panel perspectives). */
+export async function runAgentOnce(
+  options: AgentRunOptions,
+  timeoutMs = 30_000
+): Promise<string> {
+  if (isCasualMessage(options.message) && !options.promptOverride) {
+    return casualReply(options.agentId);
+  }
+
+  const apiKey = process.env.CURSOR_API_KEY?.trim();
+  if (!apiKey) {
+    let fallback = "";
+    for await (const chunk of streamFallbackResponse(options)) {
+      fallback += chunk;
+    }
+    return fallback.trim();
+  }
+
+  const { Agent } = await import("@cursor/sdk");
+  const systemPrompt = buildSystemPrompt(options.agentId, {
+    relatedIdeas: options.relatedIdeas,
+    ideaTitle: options.ideaTitle,
+    researchBlock: options.researchBlock,
+  });
+
+  const crossBlock = options.crossChatContext
+    ? `\n\n## Context from other chats\n${options.crossChatContext}`
+    : "";
+
+  const historyBlock =
+    options.history.length > 0
+      ? `\n\n## Conversation so far\n${options.history
+          .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
+          .join("\n\n")}`
+      : "";
+
+  const prompt =
+    options.promptOverride ??
+    `${systemPrompt}${crossBlock}${historyBlock}\n\nUSER: ${options.message}\n\nRespond as the active BMAD agent. Be concise.`;
+
+  const agent = await Agent.create({
+    apiKey,
+    model: { id: "composer-2.5" },
+    local: { cwd: process.cwd() },
+  });
+
+  const run = await agent.send(prompt);
+  const deadline = Date.now() + timeoutMs;
+  let full = "";
+
+  for await (const event of run.stream()) {
+    if (Date.now() > deadline) break;
+    const text = extractTextFromEvent(event);
+    if (text) full += text;
+  }
+
+  return full.trim();
 }
 
 export async function* streamAgentResponse(
@@ -80,7 +142,11 @@ async function* streamWithCursorSdk(
         ? "\n\nUSER invoked **defend this**. Steel-man the strongest version of the idea."
         : "";
 
-  const prompt = `${systemPrompt}${historyBlock}\n\nUSER: ${options.message}${forgePrefix}\n\nRespond as the active BMAD agent. Use the required response format.`;
+  const crossBlock = options.crossChatContext
+    ? `\n\n## Context from other chats\n${options.crossChatContext}`
+    : "";
+
+  const prompt = `${systemPrompt}${crossBlock}${historyBlock}\n\nUSER: ${options.message}${forgePrefix}\n\nRespond as the active BMAD agent. Use the required response format.`;
 
   const run = await agent.send(prompt);
   const deadline = Date.now() + CURSOR_TIMEOUT_MS;

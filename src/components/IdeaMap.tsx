@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Lightbulb, Link2, Network, Sparkles } from "lucide-react";
-import type { IdeaGraph, IdeaGraphEdge, IdeaGraphNode } from "@/lib/types";
+import type { IdeaGraph, IdeaGraphEdge, IdeaGraphNode, IdeaThought } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const WIDTH = 900;
@@ -152,11 +152,11 @@ function computeLayout(
 
 interface IdeaMapProps {
   graph: IdeaGraph;
-  activeIdeaId?: string;
+  thoughts?: IdeaThought[];
   onSelectIdea: (ideaId: string) => void;
 }
 
-export function IdeaMap({ graph, activeIdeaId, onSelectIdea }: IdeaMapProps) {
+export function IdeaMap({ graph, thoughts = [], onSelectIdea }: IdeaMapProps) {
   const { nodes, edges } = graph;
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [hoveredEdge, setHoveredEdge] = useState<number | null>(null);
@@ -279,7 +279,6 @@ export function IdeaMap({ graph, activeIdeaId, onSelectIdea }: IdeaMapProps) {
             const p = positions.get(node.id);
             if (!p) return null;
             const color = clusterColor(node.groupIndex);
-            const isActive = node.id === activeIdeaId;
             const isHovered = node.id === hoveredNode;
             const isNeighbor = connectedToHover.has(node.id);
             const dimmed = Boolean(hoveredNode) && !isHovered && !isNeighbor;
@@ -295,23 +294,23 @@ export function IdeaMap({ graph, activeIdeaId, onSelectIdea }: IdeaMapProps) {
                 onMouseLeave={() => setHoveredNode((cur) => (cur === node.id ? null : cur))}
                 onClick={() => onSelectIdea(node.id)}
               >
-                {(isActive || isHovered) && (
+                {isHovered && (
                   <circle r={r + 6} fill={color} opacity={0.18} />
                 )}
                 <circle
                   r={r}
                   fill={color}
-                  fillOpacity={isHovered || isNeighbor || isActive ? 0.95 : 0.75}
-                  stroke={isActive ? "#fff" : color}
-                  strokeWidth={isActive ? 2.5 : 1.5}
+                  fillOpacity={isHovered || isNeighbor ? 0.95 : 0.75}
+                  stroke={isHovered ? "#fff" : color}
+                  strokeWidth={isHovered ? 2.5 : 1.5}
                 />
                 <text
                   y={r + 14}
                   textAnchor="middle"
                   className="pointer-events-none select-none"
                   fontSize={13}
-                  fill={isHovered || isActive ? "#f4f4f5" : "#a1a1aa"}
-                  fontWeight={isHovered || isActive ? 600 : 400}
+                  fill={isHovered ? "#f4f4f5" : "#a1a1aa"}
+                  fontWeight={isHovered ? 600 : 400}
                 >
                   {label}
                 </text>
@@ -364,7 +363,24 @@ export function IdeaMap({ graph, activeIdeaId, onSelectIdea }: IdeaMapProps) {
                   ))}
                 </div>
               )}
-              <p className="mt-1.5 text-[10px] text-zinc-600">Click to open its memory thread</p>
+              {thoughts.filter((t) => t.ideaId === hoveredNodeData.id).length > 0 && (
+                <div className="mt-2 max-h-32 overflow-y-auto border-t border-zinc-800 pt-2">
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+                    Thoughts across chats
+                  </p>
+                  <ul className="mt-1 space-y-1">
+                    {thoughts
+                      .filter((t) => t.ideaId === hoveredNodeData.id)
+                      .slice(0, 5)
+                      .map((t) => (
+                        <li key={t.id} className="text-[10px] text-zinc-500">
+                          <span className="text-zinc-400">{t.sessionTitle}:</span> {t.excerpt}
+                        </li>
+                      ))}
+                  </ul>
+                </div>
+              )}
+              <p className="mt-1.5 text-[10px] text-zinc-600">Click to open that chat</p>
             </div>
           ) : (
             <div>
@@ -382,7 +398,7 @@ export function IdeaMap({ graph, activeIdeaId, onSelectIdea }: IdeaMapProps) {
                 ))}
               </ul>
               <p className={cn("mt-2 text-[10px] text-zinc-600")}>
-                Hover a node or link for details · click a node to open its thread
+                Hover a node for thoughts from your chats · click to open that conversation
               </p>
             </div>
           )}

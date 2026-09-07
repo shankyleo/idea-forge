@@ -22,3 +22,132 @@ body {
   scrollbar-width: thin;
   scrollbar-color: #3f3f46 transparent;
 }
+
+/* Agent face animations */
+@keyframes agent-blink {
+  0%, 44%, 48%, 100% { transform: scaleY(1); }
+  46% { transform: scaleY(0.08); }
+}
+
+@keyframes agent-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+
+@keyframes agent-shake {
+  0%, 100% { transform: translateX(0) rotate(0deg); }
+  25% { transform: translateX(-0.5px) rotate(-1.5deg); }
+  75% { transform: translateX(0.5px) rotate(1.5deg); }
+}
+
+@keyframes agent-scan {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(2px); }
+}
+
+@keyframes agent-wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-4deg); }
+  75% { transform: rotate(4deg); }
+}
+
+@keyframes agent-nod {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(3deg); }
+}
+
+@keyframes agent-tilt {
+  0%, 100% { transform: rotate(-3deg); }
+  50% { transform: rotate(3deg); }
+}
+
+@keyframes agent-glow {
+  0%, 100% { filter: drop-shadow(0 0 0 transparent); }
+  50% { filter: drop-shadow(0 0 4px currentColor); }
+}
+
+@keyframes agent-sparkle {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.15); }
+}
+
+@keyframes agent-squint {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(0.5px); }
+}
+
+@keyframes agent-thought-float {
+  0%, 100% { transform: translateY(0); opacity: 0.7; }
+  50% { transform: translateY(-1.5px); opacity: 1; }
+}
+
+.agent-face {
+  color: inherit;
+}
+
+.agent-face--honesty {
+  animation: agent-nod 4s ease-in-out infinite;
+}
+.agent-face--honesty .agent-eye-left,
+.agent-face--honesty .agent-eye-right {
+  transform-origin: center;
+  animation: agent-blink 5s ease-in-out infinite;
+}
+
+.agent-face--recon {
+  animation: agent-bounce 3s ease-in-out infinite;
+}
+.agent-face--recon .agent-pupil-left,
+.agent-face--recon .agent-pupil-right {
+  animation: agent-scan 2.5s ease-in-out infinite;
+}
+
+.agent-face--forge {
+  animation: agent-shake 2.8s ease-in-out infinite;
+}
+
+.agent-face--brainstorm {
+  animation: agent-bounce 2s ease-in-out infinite;
+}
+.agent-face--brainstorm .agent-spark {
+  animation: agent-sparkle 1.5s ease-in-out infinite;
+  transform-origin: 16px 6px;
+}
+
+.agent-face--reviewer {
+  animation: agent-squint 3s ease-in-out infinite;
+}
+.agent-face--reviewer .agent-brow-raise {
+  animation: agent-bounce 2.5s ease-in-out infinite;
+  transform-origin: 20px 11px;
+}
+
+.agent-face--maya {
+  animation: agent-glow 3s ease-in-out infinite;
+}
+.agent-face--maya .agent-smile {
+  animation: agent-bounce 4s ease-in-out infinite;
+  transform-origin: 16px 21px;
+}
+
+.agent-face--victor {
+  animation: agent-tilt 3.5s ease-in-out infinite;
+}
+.agent-face--victor .agent-crown {
+  animation: agent-sparkle 2s ease-in-out infinite;
+  transform-origin: 16px 6px;
+}
+
+.agent-face--quinn {
+  animation: agent-nod 3.5s ease-in-out infinite;
+}
+.agent-face--quinn .agent-thought {
+  animation: agent-thought-float 2s ease-in-out infinite;
+}
+
+.agent-face--party {
+  animation: agent-wiggle 1.2s ease-in-out infinite;
+}
+.agent-face--party .agent-confetti {
+  animation: agent-sparkle 1.8s ease-in-out infinite;
+}

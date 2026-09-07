@@ -105,6 +105,11 @@ function initSchema(database: Database.Database) {
   } catch {
     // column already exists
   }
+  try {
+    database.exec(`ALTER TABLE ideas ADD COLUMN honesty_snapshot TEXT`);
+  } catch {
+    // column already exists
+  }
 }
 
 function rowToIdea(row: Record<string, unknown>): IdeaRecord {
@@ -577,4 +582,72 @@ export function getMessages(sessionId: string): ChatMessage[] {
     .prepare("SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC")
     .all(sessionId) as Record<string, unknown>[];
   return rows.map((row) => mapMessageRow(row));
+}
+
+export function getIdeaHonestySnapshot(ideaId: string): HonestyBreakdown | null {
+  const row = getDb().prepare("SELECT honesty_snapshot FROM ideas WHERE id = ?").get(ideaId) as
+    | { honesty_snapshot: string | null }
+    | undefined;
+  if (!row?.honesty_snapshot) return null;
+  try {
+    return JSON.parse(row.honesty_snapshot) as HonestyBreakdown;
+  } catch {
+    return null;
+  }
+}
+
+export function updateIdeaHonestySnapshot(ideaId: string, breakdown: HonestyBreakdown) {
+  const now = new Date().toISOString();
+  getDb()
+    .prepare(`UPDATE ideas SET honesty_snapshot = ?, updated_at = ? WHERE id = ?`)
+    .run(JSON.stringify(breakdown), now, ideaId);
+}
+
+export function getCrossChatContext(ideaId: string, excludeSessionId: string): string {
+  const messages = getMessagesForIdea(ideaId).filter((m) => m.sessionId !== excludeSessionId);
+  if (messages.length === 0) return "";
+
+  const snippets = messages.slice(-8).map((m) => {
+    const who = m.role === "user" ? "You" : m.agentId ?? "Assistant";
+    const chat = m.sessionTitle ?? "Another chat";
+    return `[${chat}] ${who}: ${m.content.slice(0, 220).replace(/\s+/g, " ")}`;
+  });
+
+  return `You've explored this idea in other chats:\n${snippets.join("\n")}`;
+}
+
+export interface IdeaThought {
+  id: string;
+  ideaId: string;
+  ideaTitle: string;
+  sessionId: string;
+  sessionTitle: string;
+  role: string;
+  excerpt: string;
+  createdAt: string;
+}
+
+export function getThoughtsForIdea(ideaId: string): IdeaThought[] {
+  const messages = getMessagesForIdea(ideaId);
+  return messages
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .map((m) => ({
+      id: m.id,
+      ideaId: m.ideaId ?? ideaId,
+      ideaTitle: m.ideaTitle ?? getIdea(ideaId)?.title ?? "",
+      sessionId: m.sessionId,
+      sessionTitle: m.sessionTitle ?? "Chat",
+      role: m.role,
+      excerpt: m.content.slice(0, 160).replace(/\s+/g, " "),
+      createdAt: m.createdAt,
+    }));
+}
+
+export function listAllIdeaThoughts(): IdeaThought[] {
+  const ideas = listIdeas();
+  const out: IdeaThought[] = [];
+  for (const idea of ideas) {
+    out.push(...getThoughtsForIdea(idea.id));
+  }
+  return out.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }

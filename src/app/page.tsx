@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { AgentInfo, ChatSession, IdeaGraph, IdeaGroup, IdeaRecord } from "@/lib/types";
+import type { AgentInfo, ChatSession, IdeaGraph, IdeaGroup, IdeaRecord, IdeaThought } from "@/lib/types";
 import {
   IdeaSidebar,
   getStoredSessionId,
@@ -42,12 +42,14 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<SidebarTab>("chat");
   const [graph, setGraph] = useState<IdeaGraph>({ nodes: [], edges: [] });
+  const [thoughts, setThoughts] = useState<IdeaThought[]>([]);
 
   const loadGraph = useCallback(async () => {
     const res = await fetchWithTimeout("/api/ideas?graph=1");
     if (!res.ok) return;
     const data = await res.json();
     setGraph({ nodes: data.nodes ?? [], edges: data.edges ?? [] });
+    setThoughts(data.thoughts ?? []);
   }, []);
 
   const loadSidebar = useCallback(async () => {
@@ -177,14 +179,10 @@ export default function HomePage() {
         storeSessionId(data.session.id);
         setSessionId(data.session.id);
       }
-      setActiveIdeaId(ideaId);
-      setIdeaDetail(data.idea ?? null);
-      // Opening an idea shows its connected thread in the chat view.
       setTab("chat");
-      await loadIdeaDetail(ideaId);
       await loadSidebar();
     },
-    [loadIdeaDetail, loadSidebar]
+    [loadSidebar]
   );
 
   const handleNewSession = useCallback(async () => {
@@ -267,17 +265,20 @@ export default function HomePage() {
       </div>
       <div className="min-w-0 flex-1">
         {tab === "idea" ? (
-          <IdeaMap graph={graph} activeIdeaId={activeIdeaId} onSelectIdea={handleSelectIdea} />
+          <IdeaMap
+            graph={graph}
+            thoughts={thoughts}
+            onSelectIdea={handleSelectIdea}
+          />
         ) : (
           <ChatWindow
-            key={`${sessionId}-${activeIdeaId ?? "all"}`}
+            key={sessionId}
             sessionId={sessionId}
-            activeIdeaId={activeIdeaId}
-            ideaTitle={ideaDetail?.title}
             agents={agents}
             cursorApiConfigured={cursorApiConfigured}
             onIdeasUpdated={handleIdeasUpdated}
             onSessionActivity={() => storeSessionId(sessionId)}
+            onContinueSimilarChat={handleSelectSession}
           />
         )}
       </div>

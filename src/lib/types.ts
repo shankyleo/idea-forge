@@ -1,3 +1,21 @@
+export interface IdeaThought {
+  id: string;
+  ideaId: string;
+  ideaTitle: string;
+  sessionId: string;
+  sessionTitle: string;
+  role: string;
+  excerpt: string;
+  createdAt: string;
+}
+
+export interface SimilarIdeaNudge {
+  ideaId: string;
+  title: string;
+  sessionId: string;
+  score: number;
+}
+
 export type BmadAgentId =
   | "honesty-coach"
   | "deep-recon"

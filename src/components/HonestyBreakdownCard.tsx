@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 interface HonestyBreakdownCardProps {
   breakdown: HonestyBreakdown;
   compact?: boolean;
+  delta?: number;
 }
 
 function barColor(score: number): string {
@@ -20,10 +21,17 @@ function textColor(score: number): string {
   return "text-rose-400";
 }
 
-export function HonestyBreakdownCard({ breakdown, compact }: HonestyBreakdownCardProps) {
+export function HonestyBreakdownCard({ breakdown, compact, delta }: HonestyBreakdownCardProps) {
   return (
     <div className="rounded-lg border border-teal-500/25 bg-teal-500/10 px-3 py-2 text-sm">
-      <p className="font-medium text-teal-200">Honesty breakdown</p>
+      <p className="font-medium text-teal-200">
+        {compact ? "Idea grounding" : "Honesty Coach breakdown"}
+        {typeof delta === "number" && delta !== 0 && (
+          <span className={cn("ml-2 text-xs", delta > 0 ? "text-emerald-400" : "text-rose-400")}>
+            {delta > 0 ? `+${delta}` : delta} this turn
+          </span>
+        )}
+      </p>
       {!compact && breakdown.summary && (
         <p className="mt-1 text-xs text-zinc-400">{breakdown.summary}</p>
       )}

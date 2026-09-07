@@ -1,6 +1,7 @@
 "use client";
 
 import type { AgentInfo, BmadAgentId } from "@/lib/types";
+import { AgentIcon } from "@/components/AgentIcon";
 import { cn } from "@/lib/utils";
 
 interface AgentPickerProps {
@@ -18,7 +19,7 @@ export function AgentPicker({ agents, selected, onSelect }: AgentPickerProps) {
           type="button"
           onClick={() => onSelect(agent.id)}
           className={cn(
-            "rounded-full border px-3 py-1.5 text-left text-xs transition-all",
+            "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-left text-xs transition-all",
             selected === agent.id
               ? "border-white/30 bg-white/10 text-white shadow-sm"
               : "border-zinc-700 bg-zinc-900/50 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
@@ -29,8 +30,9 @@ export function AgentPicker({ agents, selected, onSelect }: AgentPickerProps) {
               : undefined
           }
         >
+          <AgentIcon agentId={agent.id} className="h-7 w-7" color={agent.color} />
           <span className="font-semibold">{agent.name}</span>
-          <span className="ml-1 hidden text-zinc-500 sm:inline">· {agent.persona}</span>
+          <span className="hidden text-zinc-500 sm:inline">· {agent.persona}</span>
         </button>
       ))}
     </div>

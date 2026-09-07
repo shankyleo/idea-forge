@@ -1,11 +1,13 @@
 # Idea Forge
 
-A BMAD-powered thinking companion that helps you brainstorm, research, pressure-test, and connect app ideas — with an honesty score on every message.
+A BMAD-powered thinking companion that helps you brainstorm, research, pressure-test, and connect app ideas — with optional dimensional honesty analysis via the Honesty Coach agent.
+
+**Repository:** https://github.com/shankyleo/idea-forge
 
 ## Features
 
-- **BMAD agents** — Deep Recon (default), Forge, Carson, Red Team, Maya, Victor, Dr. Quinn, Party Mode
-- **Honesty scoring** — Every message is scored on evidence, specificity, assumptions, and feasibility
+- **BMAD agents** — Deep Recon (default), Forge, Carson, Red Team, Maya, Victor, Dr. Quinn, Party Mode, **Honesty Coach**
+- **Honesty Coach** — Six-dimension breakdown (evidence, specificity, assumptions, feasibility, market awareness, confidence calibration). No single overall score. Only runs when you select Honesty Coach — casual messages like "hi" are not scored.
 - **Deep Recon** — Live web search with idea depth score (competition, market signals, go/no-go guidance)
 - **Idea vault** — Ideas are auto-captured from chat and linked when related
 - **Cursor API** — Live agent responses via `@cursor/sdk` when `CURSOR_API_KEY` is set

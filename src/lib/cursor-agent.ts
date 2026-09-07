@@ -1,5 +1,8 @@
 import { buildSystemPrompt } from "@/lib/bmad/load-skill";
+import { casualReply, isCasualMessage } from "@/lib/message-utils";
 import type { BmadAgentId, DepthScore, HonestyScore } from "@/lib/types";
+
+const CURSOR_TIMEOUT_MS = 45_000;
 
 export interface AgentRunOptions {
   agentId: BmadAgentId;
@@ -19,6 +22,11 @@ export function hasCursorApiKey(): boolean {
 export async function* streamAgentResponse(
   options: AgentRunOptions
 ): AsyncGenerator<string, void, unknown> {
+  if (isCasualMessage(options.message)) {
+    yield casualReply(options.agentId);
+    return;
+  }
+
   const apiKey = process.env.CURSOR_API_KEY?.trim();
 
   if (!apiKey) {
@@ -27,38 +35,63 @@ export async function* streamAgentResponse(
   }
 
   try {
-    const { Agent } = await import("@cursor/sdk");
-    const systemPrompt = buildSystemPrompt(options.agentId, {
-      relatedIdeas: options.relatedIdeas,
-      honestyScore: options.honestyScore,
-      ideaTitle: options.ideaTitle,
-      researchBlock: options.researchBlock,
-    });
-
-    const historyBlock =
-      options.history.length > 0
-        ? `\n\n## Conversation so far\n${options.history
-            .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
-            .join("\n\n")}`
-        : "";
-
-    const agent = await Agent.create({
-      apiKey,
-      model: { id: "composer-2.5" },
-      local: { cwd: process.cwd() },
-    });
-
-    const prompt = `${systemPrompt}${historyBlock}\n\nUSER: ${options.message}\n\nRespond as the active BMAD agent. Be concise unless depth is needed.`;
-
-    const run = await agent.send(prompt);
-
-    for await (const event of run.stream()) {
-      const text = extractTextFromEvent(event);
-      if (text) yield text;
-    }
+    yield* streamWithCursorSdk(options, apiKey);
   } catch (error) {
     console.error("Cursor SDK error:", error);
     yield* streamFallbackResponse(options, error);
+  }
+}
+
+async function* streamWithCursorSdk(
+  options: AgentRunOptions,
+  apiKey: string
+): AsyncGenerator<string, void, unknown> {
+  const { Agent } = await import("@cursor/sdk");
+  const systemPrompt = buildSystemPrompt(options.agentId, {
+    relatedIdeas: options.relatedIdeas,
+    honestyScore: options.honestyScore,
+    ideaTitle: options.ideaTitle,
+    researchBlock: options.researchBlock,
+  });
+
+  const historyBlock =
+    options.history.length > 0
+      ? `\n\n## Conversation so far\n${options.history
+          .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
+          .join("\n\n")}`
+      : "";
+
+  const agent = await Agent.create({
+    apiKey,
+    model: { id: "composer-2.5" },
+    local: { cwd: process.cwd() },
+  });
+
+  const prompt = `${systemPrompt}${historyBlock}\n\nUSER: ${options.message}\n\nRespond as the active BMAD agent. Be concise unless depth is needed.`;
+
+  const run = await agent.send(prompt);
+  const deadline = Date.now() + CURSOR_TIMEOUT_MS;
+  let gotText = false;
+
+  for await (const event of run.stream()) {
+    if (Date.now() > deadline) {
+      if (!gotText) {
+        yield* streamFallbackResponse(
+          options,
+          new Error("Cursor agent timed out after 45s")
+        );
+      }
+      return;
+    }
+    const text = extractTextFromEvent(event);
+    if (text) {
+      gotText = true;
+      yield text;
+    }
+  }
+
+  if (!gotText) {
+    yield* streamFallbackResponse(options, new Error("No response from Cursor agent"));
   }
 }
 

@@ -39,7 +39,7 @@ async function searchDuckDuckGo(query: string): Promise<SearchResult[]> {
             "Mozilla/5.0 (compatible; IdeaForge/1.0; +https://github.com/bmad-code-org)",
           Accept: "text/html",
         },
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(6000),
       }
     );
 
@@ -175,8 +175,11 @@ export async function runDeepRecon(idea: string): Promise<DeepReconResult> {
   const allFindings: SearchResult[] = [];
   const seen = new Set<string>();
 
-  for (const query of queries) {
-    const results = await searchDuckDuckGo(query);
+  const searchResults = await Promise.all(
+    queries.map((q) => searchDuckDuckGo(q))
+  );
+
+  for (const results of searchResults) {
     for (const r of results) {
       const key = r.url || r.title;
       if (!seen.has(key)) {

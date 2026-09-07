@@ -5,6 +5,22 @@ import type { AgentInfo, IdeaRecord } from "@/lib/types";
 import { IdeaSidebar } from "@/components/IdeaSidebar";
 import { ChatWindow } from "@/components/ChatWindow";
 
+const INIT_TIMEOUT_MS = 15_000;
+
+async function fetchWithTimeout(
+  input: RequestInfo,
+  init?: RequestInit,
+  ms = INIT_TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(id);
+  }
+}
+
 export default function HomePage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
@@ -15,7 +31,7 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
 
   const loadIdeas = useCallback(async () => {
-    const res = await fetch("/api/ideas");
+    const res = await fetchWithTimeout("/api/ideas");
     if (!res.ok) throw new Error("Failed to load ideas");
     const data = await res.json();
     setIdeas(data.ideas ?? []);
@@ -23,10 +39,11 @@ export default function HomePage() {
 
   const init = useCallback(async () => {
     setError(null);
+    setReady(false);
     try {
       const [agentsRes, sessionRes] = await Promise.all([
-        fetch("/api/agents"),
-        fetch("/api/sessions", {
+        fetchWithTimeout("/api/agents"),
+        fetchWithTimeout("/api/sessions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ title: "Thinking session", agentId: "deep-recon" }),
@@ -47,7 +64,14 @@ export default function HomePage() {
       await loadIdeas();
       setReady(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to start app");
+      const isTimeout = e instanceof Error && e.name === "AbortError";
+      setError(
+        isTimeout
+          ? "Server not responding. Run npm run dev in the project folder, then open http://localhost:43123 on the same machine."
+          : e instanceof Error
+            ? e.message
+            : "Failed to start app"
+      );
       setReady(false);
     }
   }, [loadIdeas]);
@@ -58,9 +82,16 @@ export default function HomePage() {
 
   if (error) {
     return (
-      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-zinc-950 text-zinc-300">
+      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-zinc-950 px-6 text-zinc-300">
         <p className="text-rose-400">Could not load Idea Forge</p>
         <p className="max-w-md text-center text-sm text-zinc-500">{error}</p>
+        <div className="max-w-md rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 text-left text-xs text-zinc-400">
+          <p className="font-medium text-zinc-300">Start the app on your machine:</p>
+          <pre className="mt-2 overflow-x-auto rounded bg-zinc-950 p-2 text-zinc-300">
+            cd /path/to/idea-forge{"\n"}npm run dev
+          </pre>
+          <p className="mt-2">Then open http://localhost:43123 in your browser.</p>
+        </div>
         <button
           type="button"
           onClick={init}
@@ -74,8 +105,9 @@ export default function HomePage() {
 
   if (!ready || !sessionId) {
     return (
-      <div className="flex h-screen items-center justify-center bg-zinc-950 text-zinc-400">
-        Loading Idea Forge...
+      <div className="flex h-screen flex-col items-center justify-center gap-2 bg-zinc-950 text-zinc-400">
+        <p>Loading Idea Forge...</p>
+        <p className="text-xs text-zinc-600">If this hangs, run npm run dev first</p>
       </div>
     );
   }

@@ -8,6 +8,9 @@ import { HonestyBadge } from "@/components/HonestyBadge";
 import { DepthBadge } from "@/components/DepthBadge";
 import { RelatedIdeas } from "@/components/IdeaSidebar";
 import { getAgent } from "@/lib/bmad/agents";
+import { isCasualMessage } from "@/lib/message-utils";
+
+const CHAT_TIMEOUT_MS = 90_000;
 
 interface ChatWindowProps {
   sessionId: string;
@@ -50,13 +53,36 @@ export function ChatWindow({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingContent]);
 
+  const finalizeAssistant = (
+    assistantMsgId: string,
+    assistantContent: string,
+    doneReceived: boolean
+  ) => {
+    const content = assistantContent.trim();
+    if (!doneReceived && content) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: assistantMsgId || `a-${Date.now()}`,
+          sessionId,
+          role: "assistant",
+          content,
+          agentId,
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+      setStreamingContent("");
+      onIdeasUpdated();
+    }
+  };
+
   const sendMessage = async () => {
     const text = input.trim();
     if (!text || loading) return;
 
     setInput("");
     setLoading(true);
-    setResearching(agentId === "deep-recon");
+    setResearching(agentId === "deep-recon" && !isCasualMessage(text));
     setStreamingContent("");
     setLastHonesty(null);
     setLastDepth(null);
@@ -71,11 +97,15 @@ export function ChatWindow({
     };
     setMessages((prev) => [...prev, optimisticUser]);
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), CHAT_TIMEOUT_MS);
+
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId, message: text, agentId }),
+        signal: controller.signal,
       });
 
       if (!res.ok || !res.body) throw new Error("Chat request failed");
@@ -86,6 +116,7 @@ export function ChatWindow({
       let assistantContent = "";
       let metaApplied = false;
       let assistantMsgId = "";
+      let doneReceived = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -118,15 +149,14 @@ export function ChatWindow({
               );
               setLastHonesty(payload.honestyScore as HonestyScore);
               if (payload.depthScore) setLastDepth(payload.depthScore as DepthScore);
-              setLastRelated(
-                (payload.relatedIdeas as typeof lastRelated) ?? []
-              );
+              setLastRelated((payload.relatedIdeas as typeof lastRelated) ?? []);
               metaApplied = true;
             }
           } else if (payload.type === "chunk") {
             assistantContent += payload.content as string;
             setStreamingContent(assistantContent);
           } else if (payload.type === "done") {
+            doneReceived = true;
             setMessages((prev) => [
               ...prev,
               {
@@ -140,22 +170,30 @@ export function ChatWindow({
             ]);
             setStreamingContent("");
             onIdeasUpdated();
+          } else if (payload.type === "error") {
+            throw new Error((payload.message as string) || "Stream error");
           }
         }
       }
+
+      finalizeAssistant(assistantMsgId, assistantContent, doneReceived);
     } catch (error) {
       console.error(error);
+      const isTimeout = error instanceof Error && error.name === "AbortError";
       setMessages((prev) => [
         ...prev,
         {
           id: `err-${Date.now()}`,
           sessionId,
           role: "assistant",
-          content: "Something went wrong. Check the server logs and try again.",
+          content: isTimeout
+            ? "Request timed out. For Deep Recon, try a shorter message or switch to Forge. If using CURSOR_API_KEY, the agent may be slow — try again."
+            : "Something went wrong. Make sure the dev server is running (`npm run dev`) and try again.",
           createdAt: new Date().toISOString(),
         },
       ]);
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
       setResearching(false);
       setStreamingContent("");
@@ -197,8 +235,8 @@ export function ChatWindow({
               challenge, and connect it to your other ideas.
             </p>
             <p className="mt-2 text-xs text-zinc-600">
-              Every message gets an honesty score. Try: &quot;I want to build a SaaS that helps
-              freelancers track invoices&quot;
+              Say hi to get started, or try: &quot;I want to build a SaaS that helps freelancers
+              track invoices&quot;
             </p>
           </div>
         )}
@@ -260,9 +298,7 @@ export function ChatWindow({
             <div className="mx-auto max-w-md space-y-2">
               <HonestyBadge score={lastHonesty} />
               {lastDepth && <DepthBadge score={lastDepth} />}
-              {lastRelated.length > 0 && (
-                <RelatedIdeas related={lastRelated} />
-              )}
+              {lastRelated.length > 0 && <RelatedIdeas related={lastRelated} />}
             </div>
           )}
 

@@ -11,6 +11,7 @@ import { streamAgentResponse } from "@/lib/cursor-agent";
 import { scoreHonesty } from "@/lib/honesty-scorer";
 import { findRelatedIdeas, linkRelatedIdeas } from "@/lib/idea-linker";
 import { runDeepRecon } from "@/lib/web-research";
+import { shouldRunWebResearch } from "@/lib/message-utils";
 import type { BmadAgentId, DepthScore } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -71,7 +72,7 @@ export async function POST(request: Request) {
   let researchBlock: string | undefined;
   let depthScore: DepthScore | undefined;
 
-  if (agentId === "deep-recon") {
+  if (shouldRunWebResearch(agentId, message)) {
     const recon = await runDeepRecon(message);
     researchBlock = recon.researchBlock;
     depthScore = {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Send, Sparkles, AlertCircle, Wand2 } from "lucide-react";
+import { Send, Sparkles, AlertCircle, Wand2, Brain } from "lucide-react";
 import type { AgentInfo, BmadAgentId, ChatMessage, DepthScore, HonestyBreakdown } from "@/lib/types";
 import { HonestyBreakdownCard } from "@/components/HonestyBreakdownCard";
 import { DepthBadge } from "@/components/DepthBadge";
@@ -12,16 +12,22 @@ const CHAT_TIMEOUT_MS = 90_000;
 
 interface ChatWindowProps {
   sessionId: string;
+  activeIdeaId?: string;
+  ideaTitle?: string;
   agents: AgentInfo[];
   cursorApiConfigured: boolean;
   onIdeasUpdated: () => void;
+  onSessionActivity?: () => void;
 }
 
 export function ChatWindow({
   sessionId,
+  activeIdeaId,
+  ideaTitle,
   agents,
   cursorApiConfigured,
   onIdeasUpdated,
+  onSessionActivity,
 }: ChatWindowProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -40,10 +46,16 @@ export function ChatWindow({
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const loadMessages = useCallback(async () => {
+    if (activeIdeaId) {
+      const res = await fetch(`/api/ideas?id=${activeIdeaId}`);
+      const data = await res.json();
+      setMessages(data.thread ?? []);
+      return;
+    }
     const res = await fetch(`/api/sessions?id=${sessionId}`);
     const data = await res.json();
     setMessages(data.messages ?? []);
-  }, [sessionId]);
+  }, [sessionId, activeIdeaId]);
 
   useEffect(() => {
     loadMessages();
@@ -75,6 +87,7 @@ export function ChatWindow({
       ]);
       setStreamingContent("");
       onIdeasUpdated();
+      onSessionActivity?.();
     }
   };
 
@@ -110,7 +123,11 @@ export function ChatWindow({
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, message: text }),
+        body: JSON.stringify({
+          sessionId,
+          message: text,
+          activeIdeaId: activeIdeaId ?? undefined,
+        }),
         signal: controller.signal,
       });
 
@@ -189,6 +206,8 @@ export function ChatWindow({
             setStreamingContent("");
             setStreamingAgentId(null);
             onIdeasUpdated();
+            onSessionActivity?.();
+            void loadMessages();
           } else if (payload.type === "error") {
             throw new Error((payload.message as string) || "Stream error");
           }
@@ -258,6 +277,15 @@ export function ChatWindow({
             <span className="text-zinc-500">· {activeRoute.reason}</span>
           </div>
         )}
+        {activeIdeaId && ideaTitle && (
+          <div className="mt-2 flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-100/90">
+            <Brain className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+            <span>
+              Memory thread for <strong className="font-medium">{ideaTitle}</strong> — all past
+              messages about this idea across conversations
+            </span>
+          </div>
+        )}
       </header>
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
@@ -274,48 +302,64 @@ export function ChatWindow({
         )}
 
         <div className="mx-auto max-w-3xl space-y-4">
-          {messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-            >
-              <div
-                className={`max-w-[85%] rounded-2xl px-4 py-3 ${
-                  msg.role === "user"
-                    ? "bg-indigo-600/20 text-indigo-50 ring-1 ring-indigo-500/20"
-                    : "bg-zinc-800/60 text-zinc-100 ring-1 ring-zinc-700/50"
-                }`}
-              >
-                {msg.role === "assistant" && msg.agentId && (
-                  <div className="mb-1 space-y-0.5">
-                    <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
-                      {getAgent(msg.agentId).name}
-                    </div>
-                    {msg.routeReason && (
-                      <div className="text-[10px] text-zinc-600">{msg.routeReason}</div>
+          {messages.map((msg, index) => {
+            const prev = messages[index - 1];
+            const showSessionBreak =
+              activeIdeaId &&
+              msg.sessionTitle &&
+              (!prev || prev.sessionId !== msg.sessionId);
+
+            return (
+              <div key={msg.id} className="space-y-2">
+                {showSessionBreak && (
+                  <div className="flex items-center gap-2 py-1">
+                    <div className="h-px flex-1 bg-zinc-800" />
+                    <span className="text-[10px] uppercase tracking-wide text-zinc-600">
+                      {msg.sessionTitle}
+                    </span>
+                    <div className="h-px flex-1 bg-zinc-800" />
+                  </div>
+                )}
+                <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div
+                    className={`max-w-[85%] rounded-2xl px-4 py-3 ${
+                      msg.role === "user"
+                        ? "bg-indigo-600/20 text-indigo-50 ring-1 ring-indigo-500/20"
+                        : "bg-zinc-800/60 text-zinc-100 ring-1 ring-zinc-700/50"
+                    }`}
+                  >
+                    {msg.role === "assistant" && msg.agentId && (
+                      <div className="mb-1 space-y-0.5">
+                        <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+                          {getAgent(msg.agentId).name}
+                        </div>
+                        {msg.routeReason && (
+                          <div className="text-[10px] text-zinc-600">{msg.routeReason}</div>
+                        )}
+                      </div>
+                    )}
+                    <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
+                    {msg.role === "user" && msg.honestyBreakdown && (
+                      <div className="mt-3 space-y-2">
+                        <HonestyBreakdownCard breakdown={msg.honestyBreakdown} compact />
+                        {msg.depthScore && <DepthBadge score={msg.depthScore} compact />}
+                      </div>
+                    )}
+                    {msg.role === "user" && !msg.honestyBreakdown && msg.depthScore && (
+                      <div className="mt-3">
+                        <DepthBadge score={msg.depthScore} compact />
+                      </div>
+                    )}
+                    {msg.relatedIdeas && msg.relatedIdeas.length > 0 && (
+                      <div className="mt-2">
+                        <RelatedIdeas related={msg.relatedIdeas} />
+                      </div>
                     )}
                   </div>
-                )}
-                <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
-                {msg.role === "user" && msg.honestyBreakdown && (
-                  <div className="mt-3 space-y-2">
-                    <HonestyBreakdownCard breakdown={msg.honestyBreakdown} compact />
-                    {msg.depthScore && <DepthBadge score={msg.depthScore} compact />}
-                  </div>
-                )}
-                {msg.role === "user" && !msg.honestyBreakdown && msg.depthScore && (
-                  <div className="mt-3">
-                    <DepthBadge score={msg.depthScore} compact />
-                  </div>
-                )}
-                {msg.relatedIdeas && msg.relatedIdeas.length > 0 && (
-                  <div className="mt-2">
-                    <RelatedIdeas related={msg.relatedIdeas} />
-                  </div>
-                )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
 
           {streamingContent && streamingAgentId && (
             <div className="flex justify-start">
@@ -356,7 +400,11 @@ export function ChatWindow({
                 sendMessage();
               }
             }}
-            placeholder="Type anything — an idea, feedback, a question, pushback on what you heard..."
+            placeholder={
+              activeIdeaId
+                ? `Continue thinking on "${ideaTitle?.slice(0, 40) ?? "this idea"}"...`
+                : "Type anything — an idea, feedback, a question, pushback on what you heard..."
+            }
             rows={2}
             className="flex-1 resize-none rounded-xl border border-zinc-700 bg-zinc-900/80 px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-indigo-500/50 focus:outline-none focus:ring-1 focus:ring-indigo-500/30"
             disabled={loading}

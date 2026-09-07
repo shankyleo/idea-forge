@@ -252,6 +252,162 @@ export function saveIdeaLink(link: IdeaLink) {
     .run(link.ideaId, link.relatedId, link.score, link.reason);
 }
 
+export function getAllIdeaLinks(): IdeaLink[] {
+  const rows = getDb()
+    .prepare("SELECT * FROM idea_links ORDER BY score DESC")
+    .all() as Record<string, unknown>[];
+  return rows.map((r) => ({
+    ideaId: r.idea_id as string,
+    relatedId: r.related_id as string,
+    score: r.score as number,
+    reason: r.reason as string,
+  }));
+}
+
+export function getRelatedIdeasForIdea(ideaId: string): Array<IdeaRecord & { linkReason: string; score: number }> {
+  const links = getIdeaLinks(ideaId);
+  const reverse = getDb()
+    .prepare("SELECT * FROM idea_links WHERE related_id = ? ORDER BY score DESC")
+    .all(ideaId) as Record<string, unknown>[];
+
+  const seen = new Set<string>();
+  const results: Array<IdeaRecord & { linkReason: string; score: number }> = [];
+
+  for (const link of links) {
+    if (seen.has(link.relatedId)) continue;
+    const idea = getIdea(link.relatedId);
+    if (idea) {
+      seen.add(link.relatedId);
+      results.push({ ...idea, linkReason: link.reason, score: link.score });
+    }
+  }
+  for (const row of reverse) {
+    const otherId = row.idea_id as string;
+    if (seen.has(otherId)) continue;
+    const idea = getIdea(otherId);
+    if (idea) {
+      seen.add(otherId);
+      results.push({
+        ...idea,
+        linkReason: row.reason as string,
+        score: row.score as number,
+      });
+    }
+  }
+
+  return results.sort((a, b) => b.score - a.score);
+}
+
+export function getSessionMessageCount(sessionId: string): number {
+  const row = getDb()
+    .prepare("SELECT COUNT(*) as c FROM messages WHERE session_id = ?")
+    .get(sessionId) as { c: number };
+  return row.c;
+}
+
+export function getSessionPreview(sessionId: string): string {
+  const row = getDb()
+    .prepare(
+      `SELECT content FROM messages WHERE session_id = ? AND role = 'user' ORDER BY created_at DESC LIMIT 1`
+    )
+    .get(sessionId) as { content: string } | undefined;
+  return row?.content?.slice(0, 80) ?? "";
+}
+
+export function listSessionsWithMeta(): ChatSession[] {
+  return listSessions().map((session) => ({
+    ...session,
+    messageCount: getSessionMessageCount(session.id),
+    preview: getSessionPreview(session.id),
+  }));
+}
+
+export function findBestSessionForIdea(ideaId: string): string | null {
+  const active = getDb()
+    .prepare(
+      `SELECT id FROM sessions WHERE active_idea_id = ? ORDER BY updated_at DESC LIMIT 1`
+    )
+    .get(ideaId) as { id: string } | undefined;
+  if (active) return active.id;
+
+  const row = getDb()
+    .prepare(
+      `SELECT session_id, COUNT(*) as c FROM messages WHERE idea_id = ?
+       GROUP BY session_id ORDER BY c DESC, session_id DESC LIMIT 1`
+    )
+    .get(ideaId) as { session_id: string } | undefined;
+  return row?.session_id ?? null;
+}
+
+export function getMessagesForIdea(ideaId: string): ChatMessage[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT m.*, s.title as session_title FROM messages m
+       JOIN sessions s ON s.id = m.session_id
+       WHERE m.idea_id = ?
+       ORDER BY m.created_at ASC`
+    )
+    .all(ideaId) as Record<string, unknown>[];
+
+  return rows.map((row) => mapMessageRow(row));
+}
+
+function mapMessageRow(row: Record<string, unknown>): ChatMessage {
+  return {
+    id: row.id as string,
+    sessionId: row.session_id as string,
+    role: row.role as ChatMessage["role"],
+    content: row.content as string,
+    agentId: (row.agent_id as BmadAgentId) ?? undefined,
+    honestyBreakdown: row.honesty_breakdown
+      ? (JSON.parse(row.honesty_breakdown as string) as HonestyBreakdown)
+      : row.honesty_score
+        ? legacyHonestyToBreakdown(JSON.parse(row.honesty_score as string))
+        : undefined,
+    depthScore: row.depth_score
+      ? (JSON.parse(row.depth_score as string) as DepthScore)
+      : undefined,
+    ideaId: (row.idea_id as string) ?? undefined,
+    relatedIdeas: row.related_ideas
+      ? (JSON.parse(row.related_ideas as string) as ChatMessage["relatedIdeas"])
+      : undefined,
+    routeReason: (row.route_reason as string) ?? undefined,
+    matchedAgents: row.matched_agents
+      ? (JSON.parse(row.matched_agents as string) as ChatMessage["matchedAgents"])
+      : undefined,
+    sessionTitle: (row.session_title as string) ?? undefined,
+    createdAt: row.created_at as string,
+  };
+}
+
+export function getMostRecentSessionWithMessages(): ChatSession | null {
+  const row = getDb()
+    .prepare(
+      `SELECT s.* FROM sessions s
+       INNER JOIN messages m ON m.session_id = s.id
+       GROUP BY s.id
+       ORDER BY s.updated_at DESC
+       LIMIT 1`
+    )
+    .get() as Record<string, unknown> | undefined;
+  if (!row) return null;
+  return {
+    id: row.id as string,
+    title: row.title as string,
+    activeAgentId: row.active_agent_id as BmadAgentId,
+    activeIdeaId: (row.active_idea_id as string) ?? undefined,
+    createdAt: row.created_at as string,
+    updatedAt: row.updated_at as string,
+  };
+}
+
+export function createSessionForIdea(ideaId: string): ChatSession {
+  const idea = getIdea(ideaId);
+  const session = createSession(idea?.title.slice(0, 60) ?? "Idea thread", "deep-recon");
+  updateSession(session.id, { activeIdeaId: ideaId });
+  return getSession(session.id)!;
+}
+
 export function getIdeaLinks(ideaId: string): IdeaLink[] {
   const rows = getDb()
     .prepare("SELECT * FROM idea_links WHERE idea_id = ? ORDER BY score DESC")
@@ -313,11 +469,13 @@ export function listSessions(): ChatSession[] {
 
 export function updateSession(
   id: string,
-  patch: Partial<Pick<ChatSession, "title" | "activeAgentId" | "activeIdeaId">>
+  patch: Partial<Pick<ChatSession, "title" | "activeAgentId">> & { activeIdeaId?: string | null }
 ) {
   const now = new Date().toISOString();
   const session = getSession(id);
   if (!session) return;
+  const nextIdeaId =
+    patch.activeIdeaId !== undefined ? patch.activeIdeaId ?? null : session.activeIdeaId ?? null;
   getDb()
     .prepare(
       `UPDATE sessions SET title = ?, active_agent_id = ?, active_idea_id = ?, updated_at = ? WHERE id = ?`
@@ -325,7 +483,7 @@ export function updateSession(
     .run(
       patch.title ?? session.title,
       patch.activeAgentId ?? session.activeAgentId,
-      patch.activeIdeaId ?? session.activeIdeaId ?? null,
+      nextIdeaId,
       now,
       id
     );

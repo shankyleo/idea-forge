@@ -22,9 +22,10 @@ export async function POST(request: Request) {
   const body = (await request.json()) as {
     sessionId: string;
     message: string;
+    activeIdeaId?: string;
   };
 
-  const { sessionId, message } = body;
+  const { sessionId, message, activeIdeaId: clientIdeaId } = body;
   if (!sessionId || !message?.trim()) {
     return new Response(JSON.stringify({ error: "sessionId and message required" }), {
       status: 400,
@@ -52,11 +53,17 @@ export async function POST(request: Request) {
 
   const casual = isCasualMessage(message);
   const extractedIdea = casual ? null : extractAndSaveIdea(message, sessionId);
-  let ideaId = extractedIdea?.id ?? session.activeIdeaId;
+  let ideaId = extractedIdea?.id ?? clientIdeaId ?? session.activeIdeaId;
 
-  if (extractedIdea && !session.activeIdeaId) {
-    updateSession(sessionId, { activeIdeaId: extractedIdea.id });
+  if (extractedIdea && !session.activeIdeaId && !clientIdeaId) {
+    updateSession(sessionId, {
+      activeIdeaId: extractedIdea.id,
+      title: extractedIdea.title.slice(0, 60),
+    });
     ideaId = extractedIdea.id;
+  } else if (clientIdeaId && session.activeIdeaId !== clientIdeaId) {
+    updateSession(sessionId, { activeIdeaId: clientIdeaId });
+    ideaId = clientIdeaId;
   }
 
   const related = casual ? [] : findRelatedIdeas(message, ideaId);

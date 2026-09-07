@@ -71,6 +71,7 @@ export interface ChatMessage {
   ideaId?: string;
   relatedIdeas?: Array<{ id: string; title: string; score: number; reason: string }>;
   depthScore?: DepthScore;
+  sessionTitle?: string;
   createdAt: string;
 }
 
@@ -81,6 +82,19 @@ export interface ChatSession {
   activeIdeaId?: string;
   createdAt: string;
   updatedAt: string;
+  messageCount?: number;
+  preview?: string;
+}
+
+export interface IdeaGroup {
+  id: string;
+  label: string;
+  ideas: IdeaRecord[];
+  connectionReason?: string;
+}
+
+export interface IdeaThreadMessage extends ChatMessage {
+  sessionTitle?: string;
 }
 
 export interface AgentInfo {

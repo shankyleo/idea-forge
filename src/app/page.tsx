@@ -108,10 +108,9 @@ export default function HomePage() {
 
       storeSessionId(session.id);
       setSessionId(session.id);
-      if (session.activeIdeaId) {
-        setActiveIdeaId(session.activeIdeaId);
-        await loadIdeaDetail(session.activeIdeaId);
-      }
+      // Resume the full conversation, not a single idea's filtered thread —
+      // a chat should stay together. The idea vault remains an explicit lens
+      // the user can click into.
 
       await loadSidebar();
       setReady(true);
@@ -126,7 +125,7 @@ export default function HomePage() {
       );
       setReady(false);
     }
-  }, [loadSidebar, loadIdeaDetail]);
+  }, [loadSidebar]);
 
   useEffect(() => {
     init();
@@ -136,20 +135,14 @@ export default function HomePage() {
     async (id: string) => {
       storeSessionId(id);
       setSessionId(id);
+      // Show the whole conversation for the selected session, not just one
+      // idea's thread, so nothing typed in this chat is hidden.
       setActiveIdeaId(undefined);
       setIdeaDetail(null);
       setRelatedIdeas([]);
-      const res = await fetchWithTimeout(`/api/sessions?id=${id}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.session?.activeIdeaId) {
-          setActiveIdeaId(data.session.activeIdeaId);
-          await loadIdeaDetail(data.session.activeIdeaId);
-        }
-      }
       await loadSidebar();
     },
-    [loadSidebar, loadIdeaDetail]
+    [loadSidebar]
   );
 
   const handleSelectIdea = useCallback(

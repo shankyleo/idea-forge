@@ -18,6 +18,6 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const body = (await request.json()) as { title?: string; agentId?: BmadAgentId };
-  const session = createSession(body.title ?? "New thinking session", body.agentId ?? "forge");
+  const session = createSession(body.title ?? "New thinking session", body.agentId ?? "deep-recon");
   return NextResponse.json({ session });
 }

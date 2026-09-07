@@ -12,29 +12,65 @@ export default function HomePage() {
   const [activeIdeaId, setActiveIdeaId] = useState<string | undefined>();
   const [cursorApiConfigured, setCursorApiConfigured] = useState(false);
   const [ready, setReady] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const loadIdeas = useCallback(async () => {
     const res = await fetch("/api/ideas");
+    if (!res.ok) throw new Error("Failed to load ideas");
     const data = await res.json();
     setIdeas(data.ideas ?? []);
   }, []);
 
-  useEffect(() => {
-    async function init() {
+  const init = useCallback(async () => {
+    setError(null);
+    try {
       const [agentsRes, sessionRes] = await Promise.all([
         fetch("/api/agents"),
-        fetch("/api/sessions", { method: "POST", body: JSON.stringify({ title: "Thinking session" }) }),
+        fetch("/api/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: "Thinking session", agentId: "deep-recon" }),
+        }),
       ]);
+
+      if (!agentsRes.ok) throw new Error(`Agents API failed (${agentsRes.status})`);
+      if (!sessionRes.ok) throw new Error(`Session API failed (${sessionRes.status})`);
+
       const agentsData = await agentsRes.json();
       const sessionData = await sessionRes.json();
+
+      if (!sessionData.session?.id) throw new Error("No session created");
+
       setAgents(agentsData.agents ?? []);
       setCursorApiConfigured(agentsData.cursorApiConfigured ?? false);
-      setSessionId(sessionData.session?.id ?? null);
+      setSessionId(sessionData.session.id);
       await loadIdeas();
       setReady(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to start app");
+      setReady(false);
     }
-    init();
   }, [loadIdeas]);
+
+  useEffect(() => {
+    init();
+  }, [init]);
+
+  if (error) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-zinc-950 text-zinc-300">
+        <p className="text-rose-400">Could not load Idea Forge</p>
+        <p className="max-w-md text-center text-sm text-zinc-500">{error}</p>
+        <button
+          type="button"
+          onClick={init}
+          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-500"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   if (!ready || !sessionId) {
     return (

@@ -1,5 +1,5 @@
 import { buildSystemPrompt } from "@/lib/bmad/load-skill";
-import type { BmadAgentId, HonestyScore } from "@/lib/types";
+import type { BmadAgentId, DepthScore, HonestyScore } from "@/lib/types";
 
 export interface AgentRunOptions {
   agentId: BmadAgentId;
@@ -8,6 +8,8 @@ export interface AgentRunOptions {
   relatedIdeas: Array<{ title: string; summary: string; reason: string }>;
   honestyScore: HonestyScore;
   ideaTitle?: string;
+  researchBlock?: string;
+  depthScore?: DepthScore;
 }
 
 export function hasCursorApiKey(): boolean {
@@ -30,6 +32,7 @@ export async function* streamAgentResponse(
       relatedIdeas: options.relatedIdeas,
       honestyScore: options.honestyScore,
       ideaTitle: options.ideaTitle,
+      researchBlock: options.researchBlock,
     });
 
     const historyBlock =
@@ -81,7 +84,7 @@ async function* streamFallbackResponse(
   options: AgentRunOptions,
   error?: unknown
 ): AsyncGenerator<string, void, unknown> {
-  const { agentId, message, honestyScore, relatedIdeas } = options;
+  const { agentId, message, honestyScore, relatedIdeas, researchBlock, depthScore } = options;
   const errorNote = error
     ? `\n\n*(Cursor API unavailable — running in local guidance mode. Set \`CURSOR_API_KEY\` for full BMAD agent responses.)*`
     : `\n\n*(Demo mode — add \`CURSOR_API_KEY\` from [Cursor Dashboard → API Keys](https://cursor.com/dashboard/api) for live BMAD agents.)*`;
@@ -108,13 +111,7 @@ Say **"attack this"** to argue against it, **"defend this"** for the strongest c
 
 Honesty: **${honestyScore.overall}/100** — ${honestyScore.summary}${relatedNote}${errorNote}`,
 
-    research: `Research framing for your claim:
-
-1. What decision does this research need to support?
-2. What would falsify your hypothesis?
-3. Who are 3 existing players, and how are they different?
-
-Honesty: **${honestyScore.overall}/100**. ${honestyScore.flags.length ? `Watch: ${honestyScore.flags.join("; ")}` : "Reasonable starting point."}${relatedNote}${errorNote}`,
+    "deep-recon": formatDeepReconResponse(message, honestyScore, relatedNote, errorNote, researchBlock, depthScore),
 
     "red-team": `**Adversarial review**
 
@@ -153,4 +150,41 @@ Honesty score: **${honestyScore.overall}/100**${relatedNote}${errorNote}`,
     yield chunk + " ";
     await new Promise((r) => setTimeout(r, 30));
   }
+}
+
+function formatDeepReconResponse(
+  message: string,
+  honestyScore: HonestyScore,
+  relatedNote: string,
+  errorNote: string,
+  researchBlock?: string,
+  depthScore?: DepthScore
+): string {
+  const depthSection = depthScore
+    ? `## Idea depth verdict
+
+**Depth score: ${depthScore.overall}/100** · Competition: **${depthScore.competitionLevel}**
+
+${depthScore.verdict}
+
+${depthScore.signals.length ? `Signals: ${depthScore.signals.join("; ")}` : ""}
+
+`
+    : "";
+
+  const researchSection = researchBlock
+    ? `${researchBlock}\n\n`
+    : "_Web research unavailable — check network or add CURSOR_API_KEY for full agent research._\n\n";
+
+  return `# Deep Recon report
+
+${depthSection}${researchSection}## What this means for your idea
+
+Based on live search for: "${message.slice(0, 120)}..."
+
+1. **Does it have depth?** ${depthScore ? (depthScore.overall >= 55 ? "Possibly — but validate with customer interviews." : "Unclear or crowded — narrow the niche.") : "Run again with a more specific problem statement."}
+2. **Honesty of your claim:** ${honestyScore.overall}/100 — ${honestyScore.summary}
+3. **Next step:** Pick one competitor from the results above and explain how you'd be 10x better for one user segment.
+
+${relatedNote}${errorNote}`;
 }

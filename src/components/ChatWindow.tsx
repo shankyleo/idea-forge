@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Send, Sparkles, AlertCircle } from "lucide-react";
-import type { AgentInfo, BmadAgentId, ChatMessage, HonestyScore, IdeaRecord } from "@/lib/types";
+import type { AgentInfo, BmadAgentId, ChatMessage, DepthScore, HonestyScore } from "@/lib/types";
 import { AgentPicker } from "@/components/AgentPicker";
 import { HonestyBadge } from "@/components/HonestyBadge";
+import { DepthBadge } from "@/components/DepthBadge";
 import { RelatedIdeas } from "@/components/IdeaSidebar";
 import { getAgent } from "@/lib/bmad/agents";
 
@@ -23,10 +24,12 @@ export function ChatWindow({
 }: ChatWindowProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
-  const [agentId, setAgentId] = useState<BmadAgentId>("forge");
+  const [agentId, setAgentId] = useState<BmadAgentId>("deep-recon");
   const [loading, setLoading] = useState(false);
+  const [researching, setResearching] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
   const [lastHonesty, setLastHonesty] = useState<HonestyScore | null>(null);
+  const [lastDepth, setLastDepth] = useState<DepthScore | null>(null);
   const [lastRelated, setLastRelated] = useState<
     Array<{ id: string; title: string; score: number; reason: string }>
   >([]);
@@ -53,8 +56,10 @@ export function ChatWindow({
 
     setInput("");
     setLoading(true);
+    setResearching(agentId === "deep-recon");
     setStreamingContent("");
     setLastHonesty(null);
+    setLastDepth(null);
     setLastRelated([]);
 
     const optimisticUser: ChatMessage = {
@@ -96,6 +101,7 @@ export function ChatWindow({
 
           if (payload.type === "meta") {
             assistantMsgId = (payload.assistantMessageId as string) ?? "";
+            setResearching(false);
             if (!metaApplied) {
               setMessages((prev) =>
                 prev.map((m) =>
@@ -103,6 +109,7 @@ export function ChatWindow({
                     ? {
                         ...m,
                         honestyScore: payload.honestyScore as HonestyScore,
+                        depthScore: payload.depthScore as DepthScore | undefined,
                         relatedIdeas: payload.relatedIdeas as ChatMessage["relatedIdeas"],
                         ideaId: payload.ideaId as string | undefined,
                       }
@@ -110,6 +117,7 @@ export function ChatWindow({
                 )
               );
               setLastHonesty(payload.honestyScore as HonestyScore);
+              if (payload.depthScore) setLastDepth(payload.depthScore as DepthScore);
               setLastRelated(
                 (payload.relatedIdeas as typeof lastRelated) ?? []
               );
@@ -149,6 +157,7 @@ export function ChatWindow({
       ]);
     } finally {
       setLoading(false);
+      setResearching(false);
       setStreamingContent("");
     }
   };
@@ -214,8 +223,9 @@ export function ChatWindow({
                 )}
                 <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
                 {msg.role === "user" && msg.honestyScore && (
-                  <div className="mt-3">
+                  <div className="mt-3 space-y-2">
                     <HonestyBadge score={msg.honestyScore} compact />
+                    {msg.depthScore && <DepthBadge score={msg.depthScore} compact />}
                   </div>
                 )}
                 {msg.relatedIdeas && msg.relatedIdeas.length > 0 && (
@@ -238,14 +248,27 @@ export function ChatWindow({
             </div>
           )}
 
-          {lastHonesty && loading && (
+          {researching && (
+            <div className="flex justify-center">
+              <p className="animate-pulse text-sm text-blue-400">
+                Deep Recon searching the web for market signals...
+              </p>
+            </div>
+          )}
+
+          {lastHonesty && loading && !researching && (
+            <div className="mx-auto max-w-md space-y-2">
+              <HonestyBadge score={lastHonesty} />
+              {lastDepth && <DepthBadge score={lastDepth} />}
+              {lastRelated.length > 0 && (
+                <RelatedIdeas related={lastRelated} />
+              )}
+            </div>
+          )}
+
+          {lastHonesty && loading && researching && (
             <div className="mx-auto max-w-md">
               <HonestyBadge score={lastHonesty} />
-              {lastRelated.length > 0 && (
-                <div className="mt-2">
-                  <RelatedIdeas related={lastRelated} />
-                </div>
-              )}
             </div>
           )}
 
@@ -264,7 +287,11 @@ export function ChatWindow({
                 sendMessage();
               }
             }}
-            placeholder={`Ask ${activeAgent.name} to brainstorm, attack, or defend an idea...`}
+            placeholder={
+              agentId === "deep-recon"
+                ? "Describe your idea — Deep Recon will search the market and score its depth..."
+                : `Ask ${activeAgent.name} to brainstorm, attack, or defend an idea...`
+            }
             rows={2}
             className="flex-1 resize-none rounded-xl border border-zinc-700 bg-zinc-900/80 px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-indigo-500/50 focus:outline-none focus:ring-1 focus:ring-indigo-500/30"
             disabled={loading}

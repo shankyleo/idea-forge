@@ -2,6 +2,15 @@ import type { AgentInfo, BmadAgentId } from "@/lib/types";
 
 export const BMAD_AGENTS: AgentInfo[] = [
   {
+    id: "deep-recon",
+    name: "Deep Recon",
+    persona: "Research director",
+    description:
+      "Live market & online research. Checks if your idea has real depth, competition, and whitespace.",
+    skillPath: ".agents/skills/bmad-deep-recon/SKILL.md",
+    color: "#3b82f6",
+  },
+  {
     id: "forge",
     name: "Forge",
     persona: "Adversarial interrogator",
@@ -16,14 +25,6 @@ export const BMAD_AGENTS: AgentInfo[] = [
     description: "Generate 100+ ideas using proven creative techniques.",
     skillPath: ".agents/skills/bmad-brainstorming/SKILL.md",
     color: "#eab308",
-  },
-  {
-    id: "research",
-    name: "Mary",
-    persona: "Analyst",
-    description: "Decision-grade research with citations and competitive analysis.",
-    skillPath: ".agents/skills/bmad-deep-recon/SKILL.md",
-    color: "#3b82f6",
   },
   {
     id: "red-team",

@@ -4,8 +4,9 @@ A BMAD-powered thinking companion that helps you brainstorm, research, pressure-
 
 ## Features
 
-- **BMAD agents** — Forge, Carson (brainstorm), Mary (research), Red Team reviewer, Maya (design thinking), Victor (innovation), Dr. Quinn (problem solving), and Party Mode
+- **BMAD agents** — Deep Recon (default), Forge, Carson, Red Team, Maya, Victor, Dr. Quinn, Party Mode
 - **Honesty scoring** — Every message is scored on evidence, specificity, assumptions, and feasibility
+- **Deep Recon** — Live web search with idea depth score (competition, market signals, go/no-go guidance)
 - **Idea vault** — Ideas are auto-captured from chat and linked when related
 - **Cursor API** — Live agent responses via `@cursor/sdk` when `CURSOR_API_KEY` is set
 - **Demo mode** — Works without an API key using structured BMAD-guided fallback responses

@@ -10,7 +10,8 @@ import {
 import { streamAgentResponse } from "@/lib/cursor-agent";
 import { scoreHonesty } from "@/lib/honesty-scorer";
 import { findRelatedIdeas, linkRelatedIdeas } from "@/lib/idea-linker";
-import type { BmadAgentId } from "@/lib/types";
+import { runDeepRecon } from "@/lib/web-research";
+import type { BmadAgentId, DepthScore } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -67,6 +68,20 @@ export async function POST(request: Request) {
     reason: r.reason,
   }));
 
+  let researchBlock: string | undefined;
+  let depthScore: DepthScore | undefined;
+
+  if (agentId === "deep-recon") {
+    const recon = await runDeepRecon(message);
+    researchBlock = recon.researchBlock;
+    depthScore = {
+      overall: recon.depth.depthScore,
+      competitionLevel: recon.depth.competitionLevel,
+      verdict: recon.depth.verdict,
+      signals: recon.depth.signals,
+    };
+  }
+
   const userMsgId = uuidv4();
   saveMessage({
     id: userMsgId,
@@ -74,6 +89,7 @@ export async function POST(request: Request) {
     role: "user",
     content: message,
     honestyScore,
+    depthScore,
     ideaId,
     relatedIdeas: relatedForClient,
   });
@@ -101,6 +117,7 @@ export async function POST(request: Request) {
       send({
         type: "meta",
         honestyScore,
+        depthScore,
         relatedIdeas: relatedForClient,
         ideaId,
         ideaTitle: extractedIdea?.title ?? ideaTitle,
@@ -117,6 +134,8 @@ export async function POST(request: Request) {
           relatedIdeas: relatedForPrompt,
           honestyScore,
           ideaTitle: extractedIdea?.title ?? ideaTitle,
+          researchBlock,
+          depthScore,
         })) {
           fullResponse += chunk;
           send({ type: "chunk", content: chunk });

@@ -6,6 +6,7 @@ import type {
   BmadAgentId,
   ChatMessage,
   ChatSession,
+  DepthScore,
   HonestyScore,
   IdeaLink,
   IdeaRecord,
@@ -72,6 +73,12 @@ function initSchema(database: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
     CREATE INDEX IF NOT EXISTS idx_ideas_updated ON ideas(updated_at DESC);
   `);
+
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN depth_score TEXT`);
+  } catch {
+    // column already exists
+  }
 }
 
 function rowToIdea(row: Record<string, unknown>): IdeaRecord {
@@ -293,8 +300,8 @@ export function saveMessage(msg: Omit<ChatMessage, "createdAt"> & { createdAt?: 
   const createdAt = msg.createdAt ?? new Date().toISOString();
   getDb()
     .prepare(
-      `INSERT INTO messages (id, session_id, role, content, agent_id, honesty_score, idea_id, related_ideas, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO messages (id, session_id, role, content, agent_id, honesty_score, depth_score, idea_id, related_ideas, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       msg.id,
@@ -303,6 +310,7 @@ export function saveMessage(msg: Omit<ChatMessage, "createdAt"> & { createdAt?: 
       msg.content,
       msg.agentId ?? null,
       msg.honestyScore ? JSON.stringify(msg.honestyScore) : null,
+      msg.depthScore ? JSON.stringify(msg.depthScore) : null,
       msg.ideaId ?? null,
       msg.relatedIdeas ? JSON.stringify(msg.relatedIdeas) : null,
       createdAt
@@ -322,6 +330,9 @@ export function getMessages(sessionId: string): ChatMessage[] {
     agentId: (row.agent_id as BmadAgentId) ?? undefined,
     honestyScore: row.honesty_score
       ? (JSON.parse(row.honesty_score as string) as HonestyScore)
+      : undefined,
+    depthScore: row.depth_score
+      ? (JSON.parse(row.depth_score as string) as DepthScore)
       : undefined,
     ideaId: (row.idea_id as string) ?? undefined,
     relatedIdeas: row.related_ideas

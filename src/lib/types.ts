@@ -1,12 +1,19 @@
 export type BmadAgentId =
   | "forge"
   | "brainstorm"
-  | "research"
+  | "deep-recon"
   | "red-team"
   | "design-thinking"
   | "innovation"
   | "problem-solving"
   | "party-mode";
+
+export interface DepthScore {
+  overall: number;
+  competitionLevel: "low" | "medium" | "high" | "unknown";
+  verdict: string;
+  signals: string[];
+}
 
 export interface HonestyScore {
   overall: number;
@@ -44,6 +51,7 @@ export interface ChatMessage {
   honestyScore?: HonestyScore;
   ideaId?: string;
   relatedIdeas?: Array<{ id: string; title: string; score: number; reason: string }>;
+  depthScore?: DepthScore;
   createdAt: string;
 }
 

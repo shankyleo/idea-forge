@@ -20,6 +20,7 @@ export function buildSystemPrompt(
     relatedIdeas: Array<{ title: string; summary: string; reason: string }>;
     honestyScore?: { overall: number; flags: string[]; summary: string };
     ideaTitle?: string;
+    researchBlock?: string;
   }
 ): string {
   const agent = getAgent(agentId);
@@ -40,6 +41,10 @@ export function buildSystemPrompt(
     ? `\n\n## Active idea\nThe user is working on: "${context.ideaTitle}"`
     : "";
 
+  const researchBlock = context.researchBlock
+    ? `\n\n## Pre-run web research (use as evidence — cite sources)\n${context.researchBlock}\n\nSynthesize these findings. Give a depth verdict: does this idea have real market depth or is it crowded/vague?`
+    : "";
+
   return `You are operating as the BMAD agent "${agent.name}" (${agent.persona}) inside Idea Forge, a thinking companion app.
 
 Follow the BMAD skill instructions below. Adapt them for chat (not file-based workflows). Keep responses focused and conversational unless the user wants depth.
@@ -48,9 +53,10 @@ Follow the BMAD skill instructions below. Adapt them for chat (not file-based wo
 - Score and challenge vague or overconfident claims
 - Link ideas to related ones in the vault when it genuinely helps
 - One question at a time when pressure-testing (forge mode)
+- For Deep Recon: always include a **Depth verdict** section with competition level and go/no-go guidance
 - End each response with a brief "Honesty note" only if you found material gaps
 
-${ideaBlock}${relatedBlock}${honestyBlock}
+${ideaBlock}${relatedBlock}${honestyBlock}${researchBlock}
 
 ---
 

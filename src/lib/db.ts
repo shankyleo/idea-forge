@@ -534,28 +534,5 @@ export function getMessages(sessionId: string): ChatMessage[] {
   const rows = getDb()
     .prepare("SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC")
     .all(sessionId) as Record<string, unknown>[];
-  return rows.map((row) => ({
-    id: row.id as string,
-    sessionId: row.session_id as string,
-    role: row.role as ChatMessage["role"],
-    content: row.content as string,
-    agentId: (row.agent_id as BmadAgentId) ?? undefined,
-    honestyBreakdown: row.honesty_breakdown
-      ? (JSON.parse(row.honesty_breakdown as string) as HonestyBreakdown)
-      : row.honesty_score
-        ? legacyHonestyToBreakdown(JSON.parse(row.honesty_score as string))
-        : undefined,
-    depthScore: row.depth_score
-      ? (JSON.parse(row.depth_score as string) as DepthScore)
-      : undefined,
-    ideaId: (row.idea_id as string) ?? undefined,
-    relatedIdeas: row.related_ideas
-      ? (JSON.parse(row.related_ideas as string) as ChatMessage["relatedIdeas"])
-      : undefined,
-    routeReason: (row.route_reason as string) ?? undefined,
-    matchedAgents: row.matched_agents
-      ? (JSON.parse(row.matched_agents as string) as ChatMessage["matchedAgents"])
-      : undefined,
-    createdAt: row.created_at as string,
-  }));
+  return rows.map((row) => mapMessageRow(row));
 }

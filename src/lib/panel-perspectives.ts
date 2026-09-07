@@ -4,6 +4,20 @@ import type { DeepReconResult } from "@/lib/web-research";
 
 export type { AgentPerspective };
 
+function toTopic(message: string): string {
+  let t = message.trim().replace(/\s+/g, " ");
+  t = t.replace(/^(i\s+(?:really\s+)?(?:want|would like|wanna|plan|hope|need|aim)\s+to\s+)/i, "");
+  t = t.replace(/^(i'?m\s+(?:thinking about|considering|exploring|building)\s+)/i, "");
+  t = t.replace(/^(what if\s+(?:i|we)\s+(?:could\s+)?)/i, "");
+  t = t.replace(/^(let'?s\s+)/i, "");
+  t = t.replace(/^(build|create|make|design|develop|launch|start)\s+/i, "");
+  t = t.replace(/^(an?|the|my)\s+/i, "");
+  t = t.trim().replace(/[.!?]+$/, "");
+  if (!t) t = message.trim();
+  if (t.length > 90) t = t.slice(0, 90).replace(/\s+\S*$/, "") + "…";
+  return t;
+}
+
 export function generatePerspectives(input: {
   message: string;
   depthScore?: DepthScore;
@@ -15,6 +29,9 @@ export function generatePerspectives(input: {
   const score = depthScore?.overall ?? recon?.depth.depthScore ?? 50;
   const topCompetitors = (recon?.findings ?? []).slice(0, 3).map((f) => f.title);
 
+  const topic = toTopic(message);
+  const rival = topCompetitors[0] ?? "existing players";
+
   const forge = getAgent("forge");
   const reviewer = getAgent("red-team");
   const victor = getAgent("innovation");
@@ -22,22 +39,22 @@ export function generatePerspectives(input: {
 
   const forgeContent =
     score < 45
-      ? `This idea reads crowded or vague. Before building, name **one freelancer** who paid for invoice tools last month — not hypothetically. What's the wedge vs ${topCompetitors[0] ?? "incumbents"}?`
+      ? `**"${topic}"** reads crowded or still vague. Before building, name **one real person** who paid to solve this in the last month — not hypothetically. What's your wedge vs ${rival}?`
       : competition === "high"
-        ? `Market signal is real but crowded (${score}/100 depth). Your risk isn't "no market" — it's **me-too positioning**. What do you know that ${topCompetitors[0] ?? "existing players"} got wrong for a specific niche?`
-        : `Promising space, but I'm not letting "${message.slice(0, 60)}..." slide without a kill test: **what would make you abandon this in 30 days?**`;
+        ? `**"${topic}"** has real signal but a crowded field (${score}/100 depth). Your risk isn't "no market" — it's **me-too positioning**. What do you know that ${rival} got wrong here?`
+        : `Promising space for **"${topic}"**, but I'm not letting it slide without a kill test: **what would make you abandon this in 30 days?**`;
 
   const reviewerContent =
     topCompetitors.length > 0
-      ? `Missing from your pitch: (1) why switch now, (2) pricing vs ${topCompetitors.slice(0, 2).join(" / ") || "alternatives"}, (3) one customer interview quote or data point. Pick one gap and close it this week.`
-      : `Thin evidence base — few competitors surfaced, which could mean whitespace **or** a fuzzy problem statement. Run 5 customer calls before feature design.`;
+      ? `Missing from your pitch for **"${topic}"**: (1) why users switch *now*, (2) how you differ from ${topCompetitors.slice(0, 2).join(" / ")}, (3) one real customer quote or data point. Close one gap this week.`
+      : `Thin evidence base for **"${topic}"** — few competitors surfaced, which could mean whitespace **or** a fuzzy problem statement. Run 5 customer calls before feature design.`;
 
   const victorContent =
     competition === "high"
-      ? `Don't compete head-on. Find a **10x wedge**: AI-native workflow, vertical niche (e.g. creative freelancers only), or bundling invoices with something incumbents can't ship in a quarter.`
-      : `Room to define the category — but move fast before a no-code template shop owns the narrative. What's the unfair advantage only you have?`;
+      ? `Don't compete head-on with ${rival}. Find a **10x wedge** for **"${topic}"**: an AI-native workflow, a narrow vertical, or a bundle incumbents can't ship this quarter.`
+      : `Room to define the category around **"${topic}"** — but move fast before someone else owns the narrative. What's the unfair advantage only you have?`;
 
-  const mayaContent = `Picture one freelancer at 11pm on tax day. What are they doing **right before** your app exists? If you can't describe that scene in two sentences, the idea isn't concrete enough yet.`;
+  const mayaContent = `Picture the one person who needs **"${topic}"** most, in the moment right before your product exists. What are they doing *instead* today? If you can't describe that scene in two sentences, it isn't concrete enough yet.`;
 
   return [
     { agentId: forge.id, name: forge.name, role: "Critique · always challenges", content: forgeContent, color: forge.color },

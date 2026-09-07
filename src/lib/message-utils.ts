@@ -1,4 +1,5 @@
 import type { BmadAgentId } from "@/lib/types";
+import { getAgent } from "@/lib/bmad/agents";
 
 const GREETING_PATTERN =
   /^(hi|hello|hey|yo|sup|hiya|howdy|thanks|thank you|ok|okay|help|start|good morning|good evening)[\s!.?]*$/i;
@@ -29,13 +30,15 @@ export function shouldRunPanelResearch(message: string): boolean {
 
 export function casualReply(agentId: BmadAgentId): string {
   if (agentId === "honesty-coach") {
-    return `Hey! I'm the **Honesty Coach**. Share an app or business idea and I'll break down how grounded your claims are — six dimensions, no single overall score.
+    const level = getAgent("honesty-coach");
+    return `Hey! I'm **${level.name}**, ${level.persona}. Share an app or business idea and I'll break down how grounded your claims are — six dimensions, no single overall score.
 
 Example: "I want to build a SaaS for freelancers. There's no competition and it'll be easy."`;
   }
 
   if (agentId === "deep-recon") {
-    return `Hey! I'm **Deep Recon** — I search the web and score whether your idea has real market depth.
+    const mary = getAgent("deep-recon");
+    return `Hey! I'm **${mary.name}**, ${mary.persona}. I search the web and score whether your idea has real market depth.
 
 Share something specific, for example:
 - "SaaS for freelancers to track invoices"
@@ -44,5 +47,6 @@ Share something specific, for example:
 When you share a real idea, I'll run live market research and show a depth score.`;
   }
 
-  return `Hey! I'm ready when you are. Describe an app idea, business concept, or problem you want to think through — switch to **Honesty Coach** when you want a claim breakdown.`;
+  const level = getAgent("honesty-coach");
+  return `Hey! I'm ready when you are. Describe an app idea, business concept, or problem you want to think through — try **/honesty** when you want ${level.name} to check your claims.`;
 }

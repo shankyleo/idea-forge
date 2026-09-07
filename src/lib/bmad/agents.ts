@@ -3,17 +3,17 @@ import type { AgentInfo, BmadAgentId } from "@/lib/types";
 export const BMAD_AGENTS: AgentInfo[] = [
   {
     id: "honesty-coach",
-    name: "Honesty Coach",
-    persona: "Claim grounding analyst",
+    name: "Level",
+    persona: "Claim grounding coach",
     description:
-      "BMAD agent that scores your idea across six dimensions — no overall number, full breakdown.",
+      "Scores your idea across six dimensions — evidence, specificity, assumptions, feasibility, market awareness, and confidence.",
     skillPath: ".agents/skills/bmad-honesty-coach/SKILL.md",
     color: "#14b8a6",
   },
   {
     id: "deep-recon",
-    name: "Deep Recon",
-    persona: "Research director",
+    name: "Mary",
+    persona: "Business analyst",
     description:
       "Live market & online research. Checks if your idea has real depth, competition, and whitespace.",
     skillPath: ".agents/skills/bmad-deep-recon/SKILL.md",
@@ -21,8 +21,8 @@ export const BMAD_AGENTS: AgentInfo[] = [
   },
   {
     id: "forge",
-    name: "Forge",
-    persona: "Adversarial interrogator",
+    name: "Finn",
+    persona: "Idea interrogator",
     description: "Pressure-test ideas until they harden or break. Attack and defend modes.",
     skillPath: ".agents/skills/bmad-forge-idea/SKILL.md",
     color: "#f97316",
@@ -37,7 +37,7 @@ export const BMAD_AGENTS: AgentInfo[] = [
   },
   {
     id: "red-team",
-    name: "Reviewer",
+    name: "Grumbal",
     persona: "Adversarial reviewer",
     description: "Find what's missing, not just what's wrong. Stress-test assumptions.",
     skillPath: ".agents/skills/bmad-review/SKILL.md",

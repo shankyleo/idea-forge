@@ -5,6 +5,7 @@ import {
   buildStructuredDeepReconNarrative,
 } from "@/lib/panel-perspectives";
 import type { DeepReconResult } from "@/lib/web-research";
+import { getAgent } from "@/lib/bmad/agents";
 import type { BmadAgentId, DepthScore } from "@/lib/types";
 
 const CURSOR_TIMEOUT_MS = 45_000;
@@ -246,7 +247,7 @@ async function* streamFallbackResponse(
 
     "problem-solving": `### At a glance\n\nState the problem as a symptom, then ask "why" five times.${relatedNote}${errorNote}`,
 
-    "party-mode": `### At a glance\n\n**Forge:** Weakest assumption?\n**Mary:** What data validates this?\n**Victor:** Disruption angle?${relatedNote}${errorNote}`,
+    "party-mode": `### At a glance\n\n**${getAgent("forge").name}:** Weakest assumption?\n**${getAgent("deep-recon").name}:** What data validates this?\n**${getAgent("innovation").name}:** Disruption angle?${relatedNote}${errorNote}`,
   };
 
   const response = responses[agentId] ?? responses.forge;

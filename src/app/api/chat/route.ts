@@ -17,10 +17,11 @@ import { runDeepRecon } from "@/lib/web-research";
 import { shouldRunWebResearch, shouldRunPanelResearch, isCasualMessage } from "@/lib/message-utils";
 import { runHonestyBreakdown } from "@/lib/honesty-agent";
 import { routeMessage } from "@/lib/agent-router";
-import { parseSlashCommand, slashRouteReason } from "@/lib/slash-commands";
+import { parseSlashCommand, slashRouteReason, shouldRunTeamPanel, shouldShowTurnHonesty, shouldTrackIdeaHonesty, shouldRunSlashAwareResearch } from "@/lib/slash-commands";
 import { runPanelPerspectives } from "@/lib/panel-agents";
 import { computeIdeaHonestyUpdate } from "@/lib/idea-honesty";
 import { scoreHonesty } from "@/lib/honesty-scorer";
+import { getAgent } from "@/lib/bmad/agents";
 import type { DepthScore, HonestyBreakdown, AgentPerspective } from "@/lib/types";
 import type { DeepReconResult } from "@/lib/web-research";
 
@@ -200,12 +201,23 @@ export async function POST(request: Request) {
       let perspectives: AgentPerspective[] = [];
 
       try {
-        const runResearch =
-          shouldRunWebResearch(agentId, workingMessage) ||
-          shouldRunPanelResearch(workingMessage);
+        const runPanel = shouldRunTeamPanel(slash, casual);
+        const runResearch = shouldRunSlashAwareResearch(
+          slash,
+          agentId,
+          workingMessage,
+          shouldRunWebResearch,
+          shouldRunPanelResearch,
+          casual
+        );
 
-        if (runResearch && !casual) {
-          send({ type: "status", message: "Researching the market for the panel..." });
+        if (runResearch) {
+          send({
+            type: "status",
+            message: slash?.agentId === "deep-recon"
+              ? "Researching the market..."
+              : "Researching the market for the panel...",
+          });
           reconResult = await runDeepRecon(workingMessage);
           researchBlock = reconResult.researchBlock;
           depthScore = {
@@ -221,7 +233,7 @@ export async function POST(request: Request) {
           content: m.content,
         }));
 
-        if (!casual && agentId !== "honesty-coach") {
+        if (runPanel) {
           send({ type: "status", message: "Panel discussing your idea..." });
           perspectives = await runPanelPerspectives({
             message: topicMessage ?? workingMessage,
@@ -235,20 +247,20 @@ export async function POST(request: Request) {
         }
 
         if (agentId === "honesty-coach" && !casual) {
-          send({ type: "status", message: "Honesty Coach analyzing claims..." });
+          send({ type: "status", message: `${getAgent("honesty-coach").name} analyzing claims...` });
           const result = await runHonestyBreakdown(workingMessage);
           honestyBreakdown = result.breakdown ?? undefined;
           honestyNarrative = result.narrative;
         }
 
-        if (!casual) {
+        if (shouldShowTurnHonesty(slash, casual) && agentId !== "honesty-coach") {
           turnHonesty = scoreHonesty(
             buildHonestyInput(workingMessage, perspectives),
             honestyContext(depthScore, reconResult)
           );
         }
 
-        if (ideaId && !casual) {
+        if (shouldTrackIdeaHonesty(slash, casual) && ideaId) {
           const { breakdown, delta } = computeIdeaHonestyUpdate({
             ideaId,
             userMessage: workingMessage,
@@ -265,7 +277,13 @@ export async function POST(request: Request) {
         }
 
         const userHonestyBreakdown =
-          agentId === "honesty-coach" && honestyBreakdown ? honestyBreakdown : turnHonesty;
+          agentId === "honesty-coach" && honestyBreakdown
+            ? honestyBreakdown
+            : shouldShowTurnHonesty(slash, casual)
+              ? turnHonesty
+              : undefined;
+
+        const depthForClient = runResearch ? depthScore : undefined;
 
         saveMessage({
           id: userMsgId,
@@ -273,7 +291,7 @@ export async function POST(request: Request) {
           role: "user",
           content: message,
           honestyBreakdown: userHonestyBreakdown,
-          depthScore,
+          depthScore: depthForClient,
           ideaId,
           relatedIdeas: relatedForClient,
         });
@@ -281,9 +299,11 @@ export async function POST(request: Request) {
         send({
           type: "meta",
           honestyBreakdown: userHonestyBreakdown,
-          ideaHonesty: ideaId ? getIdeaHonestySnapshot(ideaId) ?? undefined : undefined,
-          ideaHonestyDelta,
-          depthScore,
+          ideaHonesty: shouldTrackIdeaHonesty(slash, casual) && ideaId
+            ? getIdeaHonestySnapshot(ideaId) ?? undefined
+            : undefined,
+          ideaHonestyDelta: shouldTrackIdeaHonesty(slash, casual) ? ideaHonestyDelta : undefined,
+          depthScore: depthForClient,
           relatedIdeas: relatedForClient,
           similarIdeaNudge,
           ideaId,
@@ -291,7 +311,8 @@ export async function POST(request: Request) {
           agentId,
           routeReason: route.reason,
           matchedAgents: route.matchedAgents,
-          perspectives,
+          perspectives: runPanel ? perspectives : [],
+          directInvoke: Boolean(slash && slash.agentId !== "party-mode"),
           showForgeActions: !casual && agentId !== "honesty-coach",
           userMessageId: userMsgId,
           assistantMessageId: assistantMsgId,
@@ -322,7 +343,7 @@ export async function POST(request: Request) {
           }
         }
 
-        if (!casual && fullResponse.trim()) {
+        if (shouldTrackIdeaHonesty(slash, casual) && fullResponse.trim()) {
           if (ideaId) {
             computeIdeaHonestyUpdate({
               ideaId,
@@ -355,19 +376,23 @@ export async function POST(request: Request) {
           ideaId,
           routeReason: route.reason,
           matchedAgents: route.matchedAgents,
-          perspectives,
+          perspectives: runPanel ? perspectives : [],
           showForgeActions: !casual && agentId !== "honesty-coach",
-          depthScore,
+          depthScore: depthForClient,
         });
 
         send({
           type: "done",
-          perspectives,
+          perspectives: runPanel ? perspectives : [],
           showForgeActions: !casual && agentId !== "honesty-coach",
-          depthScore,
-          ideaHonesty: ideaId ? getIdeaHonestySnapshot(ideaId) ?? undefined : undefined,
-          honestyBreakdown: ideaId
-            ? getIdeaHonestySnapshot(ideaId) ?? userHonestyBreakdown
+          depthScore: depthForClient,
+          ideaHonesty: shouldTrackIdeaHonesty(slash, casual) && ideaId
+            ? getIdeaHonestySnapshot(ideaId) ?? undefined
+            : undefined,
+          honestyBreakdown: shouldTrackIdeaHonesty(slash, casual)
+            ? ideaId
+              ? getIdeaHonestySnapshot(ideaId) ?? userHonestyBreakdown
+              : userHonestyBreakdown
             : userHonestyBreakdown,
           userMessageId: userMsgId,
         });

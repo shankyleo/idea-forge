@@ -1,4 +1,5 @@
 import type { BmadAgentId } from "@/lib/types";
+import { getAgent } from "@/lib/bmad/agents";
 import { isCasualMessage } from "@/lib/message-utils";
 
 export interface RouteResult {
@@ -148,14 +149,14 @@ export function routeMessage(
   if (/^attack this[.!]?$/i.test(trimmed)) {
     return {
       agentId: "forge",
-      reason: "Forge attack mode — challenging your idea",
+      reason: `${getAgent("forge").name} attack mode — challenging your idea`,
       matchedAgents: [{ id: "forge", label: "attack mode" }],
     };
   }
   if (/^defend this[.!]?$/i.test(trimmed)) {
     return {
       agentId: "forge",
-      reason: "Forge defend mode — steel-manning your idea",
+      reason: `${getAgent("forge").name} defend mode — steel-manning your idea`,
       matchedAgents: [{ id: "forge", label: "defend mode" }],
     };
   }

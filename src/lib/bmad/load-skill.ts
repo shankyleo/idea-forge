@@ -48,8 +48,8 @@ Follow the BMAD skill instructions below. Adapt them for chat (not file-based wo
 ## App behavior
 - Link ideas to related ones in the vault when it genuinely helps
 - One question at a time when pressure-testing (forge mode)
-- For Deep Recon: include a **Depth verdict** section with competition level and go/no-go guidance
-- Honesty scoring is handled by the Honesty Coach agent only — do not invent honesty scores
+- For ${getAgent("deep-recon").name}: include a **Depth verdict** section with competition level and go/no-go guidance
+- Honesty scoring is handled by ${getAgent("honesty-coach").name} only — do not invent honesty scores
 
 ${ideaBlock}${relatedBlock}${researchBlock}${RESPONSE_FORMAT_INSTRUCTION}
 

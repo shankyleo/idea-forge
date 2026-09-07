@@ -82,7 +82,7 @@ export async function runHonestyBreakdown(message: string): Promise<{
     return {
       breakdown: null,
       narrative:
-        "Honesty analysis requires **CURSOR_API_KEY** in `.env.local`. The Honesty Coach uses a live BMAD agent — not rule-based scoring — to evaluate your claims across six dimensions.",
+        "Honesty analysis requires **CURSOR_API_KEY** in `.env.local`. Level uses a live BMAD agent — not rule-based scoring — to evaluate your claims across six dimensions.",
     };
   }
 
@@ -133,7 +133,7 @@ Follow the skill exactly. Emit the JSON block first, then your short follow-up.`
     return {
       breakdown: null,
       narrative:
-        "Honesty Coach couldn't complete the analysis. Check CURSOR_API_KEY and try again.",
+        "Level couldn't complete the analysis. Check CURSOR_API_KEY and try again.",
     };
   }
 }

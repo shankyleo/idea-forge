@@ -3,6 +3,7 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { AgentPerspective } from "@/lib/types";
+import { getAgent } from "@/lib/bmad/agents";
 import { AgentIcon } from "@/components/AgentIcon";
 import { cn } from "@/lib/utils";
 
@@ -132,7 +133,7 @@ export function ForgeActionBar({ onAction, disabled }: ForgeActionBarProps) {
   return (
     <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-700/40 pt-3">
       <span className="w-full text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
-        BMAD Forge — pressure test
+        {getAgent("forge").name} — pressure test
       </span>
       <button
         type="button"

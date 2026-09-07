@@ -135,15 +135,15 @@ ${competitorLines}
 ### What to do next
 
 1. Pick **one** competitor and write how you'd be 10× better for **one** user segment.
-2. Use **Attack this** if you want Forge to tear the idea apart — or **Defend this** to steel-man it.
-3. Run **Honesty Coach** if you want claim-by-claim grounding.`;
+2. Use **Attack this** if you want ${getAgent("forge").name} to tear the idea apart — or **Defend this** to steel-man it.
+3. Try **/honesty** if you want ${getAgent("honesty-coach").name} to check your claims.`;
 }
 
 export function buildForgeModeReply(mode: "attack" | "defend", lastUserMessage: string): string {
   const topic = lastUserMessage.slice(0, 200);
 
   if (mode === "attack") {
-    return `### Forge — Attack mode
+    return `### ${getAgent("forge").name} — Attack mode
 
 I'm **not** agreeing with this until you've answered:
 
@@ -154,7 +154,7 @@ I'm **not** agreeing with this until you've answered:
 Your move: pick **one** assumption above and defend it with evidence — or revise the idea.`;
   }
 
-  return `### Forge — Defend mode
+  return `### ${getAgent("forge").name} — Defend mode
 
 Strongest version of your idea:
 
@@ -175,7 +175,7 @@ Structure every substantive reply in clean markdown:
 
 1. **### At a glance** — 2–3 sentences max.
 2. **### Main analysis** — your primary lens. Use bullets or short tables. Never dump raw search results; synthesize max 5 competitors.
-3. Do NOT repeat the panel sections — the app renders Forge, Reviewer, Victor, and Maya perspectives separately.
+3. Do NOT repeat the panel sections — the app renders ${getAgent("forge").name}, ${getAgent("red-team").name}, ${getAgent("innovation").name}, and ${getAgent("design-thinking").name} perspectives separately.
 
 Keep paragraphs short. Use tables for scores/metrics. End the main analysis with one sharp question.
 `;

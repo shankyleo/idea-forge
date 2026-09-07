@@ -10,8 +10,9 @@ import { getAgent } from "@/lib/bmad/agents";
 import { AgentIcon } from "@/components/AgentIcon";
 import { isCasualMessage } from "@/lib/message-utils";
 import { scoreHonesty } from "@/lib/honesty-scorer";
-import { SLASH_COMMAND_HINTS, filterSlashCommandOptions, getSlashPickerQuery } from "@/lib/slash-commands";
+import { SLASH_COMMAND_HINTS, filterSlashCommandOptions, getSlashPickerQuery, parseSlashCommand, shouldShowTurnHonesty } from "@/lib/slash-commands";
 import { SlashCommandPicker } from "@/components/SlashCommandPicker";
+import { AgentReplyHeader } from "@/components/AgentReplyHeader";
 import {
   MarkdownContent,
   PerspectiveCards,
@@ -56,9 +57,14 @@ function groundingForTurn(
   isLastTurn: boolean,
   livePanel?: AgentPerspective[] | null
 ): HonestyBreakdown | undefined {
+  const slash = turn.user.content ? parseSlashCommand(turn.user.content.trim()) : null;
+  const showHonesty = !slash || shouldShowTurnHonesty(slash, isCasualMessage(turn.user.content));
+
+  if (!showHonesty) return undefined;
   if (turn.user.honestyBreakdown) return turn.user.honestyBreakdown;
-  if (isLastTurn && ideaHonesty) return ideaHonesty;
+  if (isLastTurn && ideaHonesty && !slash) return ideaHonesty;
   if (!turn.user.content || isCasualMessage(turn.user.content)) return undefined;
+  if (slash) return undefined;
 
   const perspectives = turn.assistant?.perspectives ?? livePanel ?? [];
   const panelText = perspectives.map((p) => p.content).join("\n");
@@ -75,22 +81,25 @@ function AssistantBubble({
   loading,
   onSend,
   onContinueSimilarChat,
+  invokedViaSlash,
+  slashCommand,
 }: {
   msg: ChatMessage;
   loading: boolean;
   onSend: (text: string) => void;
   onContinueSimilarChat?: (sessionId: string) => void;
+  invokedViaSlash?: boolean;
+  slashCommand?: string;
 }) {
   return (
     <div className="w-full rounded-2xl bg-zinc-800/60 px-4 py-3 ring-1 ring-zinc-700/50">
       {msg.agentId && (
-        <div className="mb-1 space-y-0.5">
-          <div className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
-            <AgentIcon agentId={msg.agentId} className="h-4 w-4" color={getAgent(msg.agentId).color} />
-            {getAgent(msg.agentId).name}
-          </div>
-          {msg.routeReason && <div className="text-[10px] text-zinc-600">{msg.routeReason}</div>}
-        </div>
+        <AgentReplyHeader
+          agentId={msg.agentId}
+          routeReason={msg.routeReason}
+          invokedViaSlash={invokedViaSlash}
+          slashCommand={slashCommand}
+        />
       )}
       <MarkdownContent content={msg.content} />
       {msg.depthScore && (
@@ -482,13 +491,23 @@ export function ChatWindow({
           )}
         </div>
         {activeRoute && routedAgentInfo && (
-          <div
-            className="mt-2 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs"
-            style={{ borderColor: `${routedAgentInfo.color}55`, color: routedAgentInfo.color }}
-          >
-            <AgentIcon agentId={routedAgentInfo.id} className="h-5 w-5" color={routedAgentInfo.color} />
-            <span className="font-semibold">{routedAgentInfo.name}</span>
-            <span className="text-zinc-500">· {activeRoute.reason}</span>
+          <div className="mt-3">
+            {activeRoute.reason.startsWith("You invoked /") ? (
+              <AgentReplyHeader
+                agentId={activeRoute.agentId}
+                routeReason={activeRoute.reason}
+                invokedViaSlash
+              />
+            ) : (
+              <div
+                className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs"
+                style={{ borderColor: `${routedAgentInfo.color}55`, color: routedAgentInfo.color }}
+              >
+                <AgentIcon agentId={routedAgentInfo.id} className="h-5 w-5" color={routedAgentInfo.color} />
+                <span className="font-semibold">{routedAgentInfo.name}</span>
+                <span className="text-zinc-500">· {activeRoute.reason}</span>
+              </div>
+            )}
           </div>
         )}
       </header>
@@ -522,9 +541,10 @@ export function ChatWindow({
               No agent picker needed. Describe an idea, react to feedback, or ask what&apos;s missing.
             </p>
             <p className="mt-3 text-xs text-zinc-500">
-              On every substantive message, Forge, Reviewer, Victor, and Maya weigh in as a{" "}
-              <span className="text-zinc-400">panel</span> — then one lead agent writes the full
-              reply. Pick the lead with a slash command:
+              Type normally for the full team flow — {getAgent("forge").name},{" "}
+              {getAgent("red-team").name}, {getAgent("innovation").name}, and{" "}
+              {getAgent("design-thinking").name} weigh in as a panel, then a lead reply. Type{" "}
+              <span className="text-zinc-400">/</span> to talk to one agent directly:
             </p>
             <div className="mt-2 flex flex-wrap justify-center gap-1.5">
               {SLASH_COMMAND_HINTS.map(({ command, agentId }) => (
@@ -562,8 +582,14 @@ export function ChatWindow({
           {turns.map((turn, turnIndex) => {
             const isLastTurn = turnIndex === turns.length - 1;
             const isLiveTurn = isLastTurn && loading;
+            const slash = turn.user.content
+              ? parseSlashCommand(turn.user.content.trim())
+              : null;
+            const showPanel = !slash || slash.agentId === "party-mode";
             const livePerspectives =
-              isLiveTurn && (streamingPerspectives.length > 0 || panelPerspectives.length > 0)
+              showPanel &&
+              isLiveTurn &&
+              (streamingPerspectives.length > 0 || panelPerspectives.length > 0)
                 ? streamingPerspectives.length > 0
                   ? streamingPerspectives
                   : panelPerspectives
@@ -600,7 +626,7 @@ export function ChatWindow({
                   </div>
                 )}
 
-                {(turn.assistant?.perspectives ?? livePerspectives)?.length ? (
+                {(showPanel && (turn.assistant?.perspectives ?? livePerspectives)?.length) ? (
                   <PerspectiveCards
                     perspectives={(turn.assistant?.perspectives ?? livePerspectives)!}
                   />
@@ -621,19 +647,19 @@ export function ChatWindow({
                     loading={loading}
                     onSend={(t) => void sendMessage(t)}
                     onContinueSimilarChat={onContinueSimilarChat}
+                    invokedViaSlash={Boolean(slash)}
+                    slashCommand={slash?.command}
                   />
                 )}
 
                 {isLiveTurn && streamingContent && streamingAgentId && (
                   <div className="w-full rounded-2xl bg-zinc-800/60 px-4 py-3 ring-1 ring-zinc-700/50">
-                    <div className="mb-1 inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
-                      <AgentIcon
-                        agentId={streamingAgentId}
-                        className="h-4 w-4"
-                        color={getAgent(streamingAgentId).color}
-                      />
-                      {getAgent(streamingAgentId).name}
-                    </div>
+                    <AgentReplyHeader
+                      agentId={streamingAgentId}
+                      routeReason={activeRoute?.reason}
+                      invokedViaSlash={Boolean(slash)}
+                      slashCommand={slash?.command}
+                    />
                     <MarkdownContent content={streamingContent} />
                     {streamingForgeActions && (
                       <ForgeActionBar disabled={loading} onAction={(t) => void sendMessage(t)} />

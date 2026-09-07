@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import type { HonestyBreakdown } from "@/lib/types";
+import { getAgent } from "@/lib/bmad/agents";
 import { cn } from "@/lib/utils";
 
 interface HonestyBreakdownCardProps {
@@ -32,7 +33,10 @@ function averageScore(breakdown: HonestyBreakdown): number {
 }
 
 function titleForVariant(variant: "coach" | "grounding"): string {
-  return variant === "coach" ? "Honesty Coach breakdown" : "Honesty breakdown";
+  if (variant === "coach") {
+    return `${getAgent("honesty-coach").name}'s breakdown`;
+  }
+  return "Honesty breakdown";
 }
 
 export function HonestyBreakdownCard({

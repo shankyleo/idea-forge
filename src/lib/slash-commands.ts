@@ -10,14 +10,18 @@ export interface SlashCommandMatch {
 
 const SLASH_ALIASES: Record<string, BmadAgentId> = {
   honesty: "honesty-coach",
+  level: "honesty-coach",
   "honesty-coach": "honesty-coach",
   recon: "deep-recon",
+  mary: "deep-recon",
   research: "deep-recon",
   "deep-recon": "deep-recon",
   forge: "forge",
+  finn: "forge",
   brainstorm: "brainstorm",
   carson: "brainstorm",
   review: "red-team",
+  grumbal: "red-team",
   reviewer: "red-team",
   "red-team": "red-team",
   maya: "design-thinking",
@@ -106,4 +110,56 @@ export function parseSlashCommand(raw: string): SlashCommandMatch | null {
 export function slashRouteReason(command: string): string {
   const agent = getAgent(SLASH_ALIASES[command] ?? "forge");
   return `You invoked /${command} — ${agent.name} is responding`;
+}
+
+/** User explicitly picked one agent — skip the default team panel + honesty card. */
+export function isDirectAgentInvoke(slash: SlashCommandMatch | null): boolean {
+  return Boolean(slash && slash.agentId !== "party-mode");
+}
+
+export function isSlashInvokeMessage(raw: string): boolean {
+  return parseSlashCommand(raw.trim()) !== null;
+}
+
+/** Full 4-agent panel — auto-route and /party only. */
+export function shouldRunTeamPanel(slash: SlashCommandMatch | null, casual: boolean): boolean {
+  if (casual) return false;
+  if (!slash) return true;
+  return slash.agentId === "party-mode";
+}
+
+/** Generic per-turn honesty card — auto-route and /honesty only. */
+export function shouldShowTurnHonesty(slash: SlashCommandMatch | null, casual: boolean): boolean {
+  if (casual) return false;
+  if (!slash) return true;
+  return slash.agentId === "honesty-coach";
+}
+
+/** Evolving idea-level honesty snapshot — not on focused single-agent invokes. */
+export function shouldTrackIdeaHonesty(slash: SlashCommandMatch | null, casual: boolean): boolean {
+  if (casual) return false;
+  if (!slash) return true;
+  return slash.agentId === "honesty-coach";
+}
+
+/** Market research — recon agent, team panel, or auto-route substantive ideas. */
+export function shouldRunSlashAwareResearch(
+  slash: SlashCommandMatch | null,
+  agentId: BmadAgentId,
+  workingMessage: string,
+  runWebResearch: (id: BmadAgentId, msg: string) => boolean,
+  runPanelResearch: (msg: string) => boolean,
+  casual: boolean
+): boolean {
+  if (casual) return false;
+  if (slash) {
+    if (slash.agentId === "deep-recon") {
+      return runWebResearch(agentId, workingMessage) || runPanelResearch(workingMessage);
+    }
+    if (slash.agentId === "party-mode") {
+      return runPanelResearch(workingMessage);
+    }
+    return false;
+  }
+  return runWebResearch(agentId, workingMessage) || runPanelResearch(workingMessage);
 }

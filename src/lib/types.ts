@@ -82,6 +82,7 @@ export interface ChatMessage {
   perspectives?: AgentPerspective[];
   showForgeActions?: boolean;
   sessionTitle?: string;
+  ideaTitle?: string;
   createdAt: string;
 }
 

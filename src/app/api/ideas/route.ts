@@ -5,7 +5,7 @@ import {
   getIdeaLinks,
   getAllIdeaLinks,
   getRelatedIdeasForIdea,
-  getMessagesForIdea,
+  getMessagesForIdeaGroup,
 } from "@/lib/db";
 import { buildIdeaGroups } from "@/lib/idea-groups";
 
@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     if (!idea) return NextResponse.json({ error: "Not found" }, { status: 404 });
     const links = getIdeaLinks(id);
     const related = getRelatedIdeasForIdea(id);
-    const thread = getMessagesForIdea(id);
+    const thread = getMessagesForIdeaGroup(id);
     return NextResponse.json({ idea, links, related, thread });
   }
 

@@ -5,7 +5,7 @@ import {
   getMessages,
   createSession,
   findBestSessionForIdea,
-  getMessagesForIdea,
+  getMessagesForIdeaGroup,
   createSessionForIdea,
   getIdea,
   updateSession,
@@ -29,7 +29,7 @@ export async function GET(request: Request) {
       sessionId = session.id;
     }
 
-    const thread = getMessagesForIdea(ideaId);
+    const thread = getMessagesForIdeaGroup(ideaId);
     return NextResponse.json({
       idea,
       session,

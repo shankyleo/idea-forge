@@ -12,6 +12,7 @@ import type {
   IdeaRecord,
 } from "@/lib/types";
 import { slugify } from "@/lib/utils";
+import { buildIdeaGroups } from "@/lib/idea-groups";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "idea-forge.db");
@@ -362,6 +363,46 @@ export function getMessagesForIdea(ideaId: string): ChatMessage[] {
   return rows.map((row) => mapMessageRow(row));
 }
 
+/**
+ * Resolve the full cluster of idea IDs an idea belongs to, using the same
+ * transitive union-find grouping the sidebar shows. Returns at least [ideaId].
+ */
+export function getIdeaGroupIds(ideaId: string): string[] {
+  const groups = buildIdeaGroups(listIdeas(), getAllIdeaLinks());
+  const group = groups.find((g) => g.ideas.some((i) => i.id === ideaId));
+  return group ? group.ideas.map((i) => i.id) : [ideaId];
+}
+
+/**
+ * Combined "storyboard" thread for a group of related ideas: every message
+ * from every idea in the cluster, ordered chronologically and de-duplicated,
+ * each carrying its session + idea title so the UI can label per-idea sections.
+ * Falls back to a single idea's thread when the idea has no related ideas.
+ */
+export function getMessagesForIdeaGroup(ideaId: string): ChatMessage[] {
+  const ids = getIdeaGroupIds(ideaId);
+  const placeholders = ids.map(() => "?").join(",");
+  const rows = getDb()
+    .prepare(
+      `SELECT m.*, s.title as session_title, i.title as idea_title FROM messages m
+       JOIN sessions s ON s.id = m.session_id
+       LEFT JOIN ideas i ON i.id = m.idea_id
+       WHERE m.idea_id IN (${placeholders})
+       ORDER BY m.created_at ASC`
+    )
+    .all(...ids) as Record<string, unknown>[];
+
+  const seen = new Set<string>();
+  const messages: ChatMessage[] = [];
+  for (const row of rows) {
+    const id = row.id as string;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    messages.push(mapMessageRow(row));
+  }
+  return messages;
+}
+
 function mapMessageRow(row: Record<string, unknown>): ChatMessage {
   return {
     id: row.id as string,
@@ -390,6 +431,7 @@ function mapMessageRow(row: Record<string, unknown>): ChatMessage {
       : undefined,
     showForgeActions: Boolean(row.show_forge_actions),
     sessionTitle: (row.session_title as string) ?? undefined,
+    ideaTitle: (row.idea_title as string) ?? undefined,
     createdAt: row.created_at as string,
   };
 }

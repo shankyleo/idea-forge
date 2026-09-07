@@ -12,7 +12,8 @@ import { findRelatedIdeas, linkRelatedIdeas } from "@/lib/idea-linker";
 import { runDeepRecon } from "@/lib/web-research";
 import { shouldRunWebResearch, isCasualMessage } from "@/lib/message-utils";
 import { runHonestyBreakdown } from "@/lib/honesty-agent";
-import type { BmadAgentId, DepthScore, HonestyBreakdown } from "@/lib/types";
+import { routeMessage } from "@/lib/agent-router";
+import type { DepthScore, HonestyBreakdown } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -21,10 +22,9 @@ export async function POST(request: Request) {
   const body = (await request.json()) as {
     sessionId: string;
     message: string;
-    agentId?: BmadAgentId;
   };
 
-  const { sessionId, message, agentId: requestedAgentId } = body;
+  const { sessionId, message } = body;
   if (!sessionId || !message?.trim()) {
     return new Response(JSON.stringify({ error: "sessionId and message required" }), {
       status: 400,
@@ -40,15 +40,23 @@ export async function POST(request: Request) {
     });
   }
 
-  const agentId = requestedAgentId ?? session.activeAgentId;
+  const historyMessages = getMessages(sessionId).filter((m) => m.role !== "system");
+  const lastAssistant = [...historyMessages].reverse().find((m) => m.role === "assistant");
+
+  const route = routeMessage(message, {
+    lastAgentId: lastAssistant?.agentId,
+    messageCount: historyMessages.length,
+  });
+  const agentId = route.agentId;
   updateSession(sessionId, { activeAgentId: agentId });
 
   const casual = isCasualMessage(message);
   const extractedIdea = casual ? null : extractAndSaveIdea(message, sessionId);
-  const ideaId = extractedIdea?.id ?? session.activeIdeaId;
+  let ideaId = extractedIdea?.id ?? session.activeIdeaId;
 
   if (extractedIdea && !session.activeIdeaId) {
     updateSession(sessionId, { activeIdeaId: extractedIdea.id });
+    ideaId = extractedIdea.id;
   }
 
   const related = casual ? [] : findRelatedIdeas(message, ideaId);
@@ -69,52 +77,11 @@ export async function POST(request: Request) {
     reason: r.reason,
   }));
 
-  let researchBlock: string | undefined;
-  let depthScore: DepthScore | undefined;
-  let honestyBreakdown: HonestyBreakdown | undefined;
-  let honestyNarrative: string | undefined;
-
-  if (shouldRunWebResearch(agentId, message)) {
-    const recon = await runDeepRecon(message);
-    researchBlock = recon.researchBlock;
-    depthScore = {
-      overall: recon.depth.depthScore,
-      competitionLevel: recon.depth.competitionLevel,
-      verdict: recon.depth.verdict,
-      signals: recon.depth.signals,
-    };
-  }
-
-  if (agentId === "honesty-coach" && !casual) {
-    const result = await runHonestyBreakdown(message);
-    honestyBreakdown = result.breakdown ?? undefined;
-    honestyNarrative = result.narrative;
-  }
-
   const userMsgId = uuidv4();
-  saveMessage({
-    id: userMsgId,
-    sessionId,
-    role: "user",
-    content: message,
-    honestyBreakdown,
-    depthScore,
-    ideaId,
-    relatedIdeas: relatedForClient,
-  });
-
-  const history = getMessages(sessionId)
-    .filter((m) => m.role !== "system")
-    .slice(-10)
-    .map((m) => ({
-      role: m.role as "user" | "assistant",
-      content: m.content,
-    }));
-
+  const assistantMsgId = uuidv4();
   const ideaTitle = ideaId ? getIdea(ideaId)?.title : undefined;
 
   const encoder = new TextEncoder();
-  const assistantMsgId = uuidv4();
   let fullResponse = "";
 
   const stream = new ReadableStream({
@@ -124,18 +91,70 @@ export async function POST(request: Request) {
       };
 
       send({
-        type: "meta",
-        honestyBreakdown,
-        depthScore,
-        relatedIdeas: relatedForClient,
-        ideaId,
-        ideaTitle: extractedIdea?.title ?? ideaTitle,
+        type: "routing",
         agentId,
-        userMessageId: userMsgId,
-        assistantMessageId: assistantMsgId,
+        routeReason: route.reason,
+        matchedAgents: route.matchedAgents,
       });
 
+      let researchBlock: string | undefined;
+      let depthScore: DepthScore | undefined;
+      let honestyBreakdown: HonestyBreakdown | undefined;
+      let honestyNarrative: string | undefined;
+
       try {
+        if (shouldRunWebResearch(agentId, message)) {
+          send({ type: "status", message: "Deep Recon searching the market..." });
+          const recon = await runDeepRecon(message);
+          researchBlock = recon.researchBlock;
+          depthScore = {
+            overall: recon.depth.depthScore,
+            competitionLevel: recon.depth.competitionLevel,
+            verdict: recon.depth.verdict,
+            signals: recon.depth.signals,
+          };
+        }
+
+        if (agentId === "honesty-coach" && !casual) {
+          send({ type: "status", message: "Honesty Coach analyzing claims..." });
+          const result = await runHonestyBreakdown(message);
+          honestyBreakdown = result.breakdown ?? undefined;
+          honestyNarrative = result.narrative;
+        }
+
+        saveMessage({
+          id: userMsgId,
+          sessionId,
+          role: "user",
+          content: message,
+          honestyBreakdown,
+          depthScore,
+          ideaId,
+          relatedIdeas: relatedForClient,
+        });
+
+        const history = getMessages(sessionId)
+          .filter((m) => m.role !== "system")
+          .slice(-10)
+          .map((m) => ({
+            role: m.role as "user" | "assistant",
+            content: m.content,
+          }));
+
+        send({
+          type: "meta",
+          honestyBreakdown,
+          depthScore,
+          relatedIdeas: relatedForClient,
+          ideaId,
+          ideaTitle: extractedIdea?.title ?? ideaTitle,
+          agentId,
+          routeReason: route.reason,
+          matchedAgents: route.matchedAgents,
+          userMessageId: userMsgId,
+          assistantMessageId: assistantMsgId,
+        });
+
         if (agentId === "honesty-coach" && !casual && honestyNarrative) {
           fullResponse = honestyNarrative;
           const chunks = honestyNarrative.split(/(?<=\.|!|\?|\n)\s+/);
@@ -164,6 +183,8 @@ export async function POST(request: Request) {
           content: fullResponse.trim(),
           agentId,
           ideaId,
+          routeReason: route.reason,
+          matchedAgents: route.matchedAgents,
         });
 
         send({ type: "done" });

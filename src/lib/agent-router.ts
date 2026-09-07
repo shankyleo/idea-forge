@@ -1,0 +1,196 @@
+import type { BmadAgentId } from "@/lib/types";
+import { isCasualMessage } from "@/lib/message-utils";
+
+export interface RouteResult {
+  agentId: BmadAgentId;
+  reason: string;
+  /** When multiple agents are equally relevant, party-mode orchestrates them */
+  matchedAgents: Array<{ id: BmadAgentId; label: string }>;
+}
+
+type RouteSignal = {
+  id: BmadAgentId;
+  label: string;
+  weight: number;
+  test: (text: string) => boolean;
+};
+
+const SIGNALS: RouteSignal[] = [
+  {
+    id: "honesty-coach",
+    label: "grounding claims",
+    weight: 3,
+    test: (t) =>
+      /\b(honest|grounded|evidence|sources|assumption|overconfident|too optimistic|no competition|everyone will|guaranteed|easy money|can't fail)\b/i.test(
+        t
+      ),
+  },
+  {
+    id: "forge",
+    label: "pressure-testing",
+    weight: 3,
+    test: (t) =>
+      /\b(attack|defend|pressure.?test|push back|stress.?test|steel.?man|weak spot|poke holes|challenge this|devil'?s advocate)\b/i.test(
+        t
+      ),
+  },
+  {
+    id: "brainstorm",
+    label: "generating options",
+    weight: 3,
+    test: (t) =>
+      /\b(brainstorm|more ideas|alternatives|what else|creative|techniques|100 ideas|diverge)\b/i.test(
+        t
+      ),
+  },
+  {
+    id: "red-team",
+    label: "finding gaps",
+    weight: 2,
+    test: (t) =>
+      /\b(what'?s missing|blind spot|risk|downside|failure mode|what could go wrong|review this|critique|red team)\b/i.test(
+        t
+      ),
+  },
+  {
+    id: "design-thinking",
+    label: "user empathy",
+    weight: 2,
+    test: (t) =>
+      /\b(user|customer|persona|empathy|who would use|pain point|journey|prototype|human.?centered)\b/i.test(
+        t
+      ),
+  },
+  {
+    id: "innovation",
+    label: "disruption angle",
+    weight: 2,
+    test: (t) =>
+      /\b(disrupt|10x|business model|unfair advantage|moat|category|innovation strategy|blue ocean)\b/i.test(
+        t
+      ),
+  },
+  {
+    id: "problem-solving",
+    label: "root cause",
+    weight: 2,
+    test: (t) =>
+      /\b(root cause|five whys|why does|diagnose|symptom|underlying problem|solve for)\b/i.test(
+        t
+      ),
+  },
+  {
+    id: "deep-recon",
+    label: "market research",
+    weight: 2,
+    test: (t) =>
+      /\b(market|competition|competitor|research|landscape|viability|depth|tam|sam|som|whitespace|trend)\b/i.test(
+        t
+      ),
+  },
+];
+
+const IDEA_PATTERN =
+  /\b(app|saas|startup|product|idea|build|create|platform|tool|service|mvp|freelancer|mobile|ai|marketplace)\b/i;
+
+function scoreSignals(text: string): Array<{ id: BmadAgentId; label: string; score: number }> {
+  const hits = SIGNALS.filter((s) => s.test(text)).map((s) => ({
+    id: s.id,
+    label: s.label,
+    score: s.weight,
+  }));
+
+  if (IDEA_PATTERN.test(text) && text.trim().length >= 25) {
+    const hasRecon = hits.some((h) => h.id === "deep-recon");
+    if (!hasRecon) {
+      hits.push({ id: "deep-recon", label: "new idea research", score: 2 });
+    }
+    const hasHonesty = hits.some((h) => h.id === "honesty-coach");
+    if (
+      !hasHonesty &&
+      /\b(no competition|easy|simple|just|only need|everyone|guaranteed|quickly)\b/i.test(text)
+    ) {
+      hits.push({ id: "honesty-coach", label: "bold claims", score: 2 });
+    }
+  }
+
+  return hits.sort((a, b) => b.score - a.score);
+}
+
+function followUpAgent(text: string, lastAgentId?: BmadAgentId): BmadAgentId | null {
+  const lower = text.toLowerCase();
+  if (/\b(disagree|but |however|what about|push back|not convinced)\b/i.test(lower)) {
+    return "forge";
+  }
+  if (/\b(more detail|go deeper|expand|tell me more)\b/i.test(lower)) {
+    return lastAgentId ?? "deep-recon";
+  }
+  if (/\b(okay|got it|next|what now|so what)\b/i.test(lower) && text.length < 80) {
+    return lastAgentId ?? "forge";
+  }
+  return null;
+}
+
+export function routeMessage(
+  message: string,
+  options?: { lastAgentId?: BmadAgentId; messageCount?: number }
+): RouteResult {
+  const trimmed = message.trim();
+
+  if (isCasualMessage(trimmed)) {
+    return {
+      agentId: "forge",
+      reason: "Casual message — conversational reply",
+      matchedAgents: [{ id: "forge", label: "conversation" }],
+    };
+  }
+
+  const followUp = followUpAgent(trimmed, options?.lastAgentId);
+  if (followUp) {
+    return {
+      agentId: followUp,
+      reason: `Continuing the thread — ${followUp === "forge" ? "pressure-testing your response" : "going deeper"}`,
+      matchedAgents: [{ id: followUp, label: "thread follow-up" }],
+    };
+  }
+
+  const hits = scoreSignals(trimmed);
+  const top = hits[0];
+  const second = hits[1];
+
+  if (!top) {
+    if (trimmed.length >= 20) {
+      return {
+        agentId: "deep-recon",
+        reason: "Substantive idea — market research and depth check",
+        matchedAgents: [{ id: "deep-recon", label: "default idea analysis" }],
+      };
+    }
+    return {
+      agentId: "forge",
+      reason: "Open-ended thought — exploratory dialogue",
+      matchedAgents: [{ id: "forge", label: "exploration" }],
+    };
+  }
+
+  const multiAgent =
+    second &&
+    top.score >= 2 &&
+    second.score >= 2 &&
+    hits.filter((h) => h.score >= 2).length >= 2;
+
+  if (multiAgent) {
+    const relevant = hits.filter((h) => h.score >= 2).slice(0, 4);
+    return {
+      agentId: "party-mode",
+      reason: `Multiple angles detected: ${relevant.map((r) => r.label).join(", ")}`,
+      matchedAgents: relevant.map((r) => ({ id: r.id, label: r.label })),
+    };
+  }
+
+  return {
+    agentId: top.id,
+    reason: `Matched for ${top.label}`,
+    matchedAgents: hits.slice(0, 3).map((h) => ({ id: h.id, label: h.label })),
+  };
+}

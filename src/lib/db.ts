@@ -84,6 +84,16 @@ function initSchema(database: Database.Database) {
   } catch {
     // column already exists
   }
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN route_reason TEXT`);
+  } catch {
+    // column already exists
+  }
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN matched_agents TEXT`);
+  } catch {
+    // column already exists
+  }
 }
 
 function rowToIdea(row: Record<string, unknown>): IdeaRecord {
@@ -325,8 +335,8 @@ export function saveMessage(msg: Omit<ChatMessage, "createdAt"> & { createdAt?: 
   const createdAt = msg.createdAt ?? new Date().toISOString();
   getDb()
     .prepare(
-      `INSERT INTO messages (id, session_id, role, content, agent_id, honesty_score, honesty_breakdown, depth_score, idea_id, related_ideas, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO messages (id, session_id, role, content, agent_id, honesty_score, honesty_breakdown, depth_score, idea_id, related_ideas, route_reason, matched_agents, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       msg.id,
@@ -339,6 +349,8 @@ export function saveMessage(msg: Omit<ChatMessage, "createdAt"> & { createdAt?: 
       msg.depthScore ? JSON.stringify(msg.depthScore) : null,
       msg.ideaId ?? null,
       msg.relatedIdeas ? JSON.stringify(msg.relatedIdeas) : null,
+      msg.routeReason ?? null,
+      msg.matchedAgents ? JSON.stringify(msg.matchedAgents) : null,
       createdAt
     );
   updateSession(msg.sessionId, {});
@@ -365,6 +377,10 @@ export function getMessages(sessionId: string): ChatMessage[] {
     ideaId: (row.idea_id as string) ?? undefined,
     relatedIdeas: row.related_ideas
       ? (JSON.parse(row.related_ideas as string) as ChatMessage["relatedIdeas"])
+      : undefined,
+    routeReason: (row.route_reason as string) ?? undefined,
+    matchedAgents: row.matched_agents
+      ? (JSON.parse(row.matched_agents as string) as ChatMessage["matchedAgents"])
       : undefined,
     createdAt: row.created_at as string,
   }));

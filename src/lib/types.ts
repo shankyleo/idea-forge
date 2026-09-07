@@ -63,6 +63,8 @@ export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
   agentId?: BmadAgentId;
+  routeReason?: string;
+  matchedAgents?: Array<{ id: BmadAgentId; label: string }>;
   honestyBreakdown?: HonestyBreakdown;
   /** @deprecated */
   honestyScore?: HonestyScore;

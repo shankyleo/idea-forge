@@ -220,6 +220,30 @@ export default function HomePage() {
     if (tab === "idea") await loadGraph();
   }, [loadSidebar, loadIdeaDetail, activeIdeaId, tab, loadGraph]);
 
+  const handleRenameSession = useCallback(
+    async (id: string, title: string) => {
+      await fetchWithTimeout("/api/sessions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, title }),
+      });
+      await loadSidebar();
+    },
+    [loadSidebar]
+  );
+
+  const handleTogglePinSession = useCallback(
+    async (id: string, pinned: boolean) => {
+      await fetchWithTimeout("/api/sessions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, pinned }),
+      });
+      await loadSidebar();
+    },
+    [loadSidebar]
+  );
+
   if (error) {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-4 bg-zinc-950 px-6 text-zinc-300">
@@ -261,6 +285,8 @@ export default function HomePage() {
           onSelectSession={handleSelectSession}
           onNewSession={handleNewSession}
           onClearIdea={handleClearIdea}
+          onRenameSession={handleRenameSession}
+          onTogglePinSession={handleTogglePinSession}
         />
       </div>
       <div className="min-w-0 flex-1">
@@ -278,6 +304,7 @@ export default function HomePage() {
             cursorApiConfigured={cursorApiConfigured}
             onIdeasUpdated={handleIdeasUpdated}
             onSessionActivity={() => storeSessionId(sessionId)}
+            onSessionUpdated={loadSidebar}
             onContinueSimilarChat={handleSelectSession}
           />
         )}

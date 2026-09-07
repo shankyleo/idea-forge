@@ -11,6 +11,28 @@ const IDEA_HINT_PATTERN =
 const ACTION_COMMAND_PATTERN =
   /^(attack this|defend this|what'?s missing)([\s.!?].*)?$/i;
 
+const FOLLOW_UP_PATTERN =
+  /^(what do you think|what about|how about|can you|could you|would you|do you|tell me|explain|clarify|why|how|what|and |but |also |not sure|maybe|i think|thanks|thank you|ok|okay|yes|no\b)/i;
+
+const NEW_IDEA_PATTERN =
+  /\b(i have an idea|new idea|different idea|another idea|i want to|thinking about|considering|what if|build a|create a|startup|product idea)\b/i;
+
+export function isFollowUpMessage(text: string): boolean {
+  const trimmed = text.trim();
+  if (ACTION_COMMAND_PATTERN.test(trimmed)) return true;
+  if (trimmed.length < 25 && !NEW_IDEA_PATTERN.test(trimmed)) return true;
+  if (FOLLOW_UP_PATTERN.test(trimmed)) return true;
+  if (trimmed.endsWith("?") && !NEW_IDEA_PATTERN.test(trimmed)) return true;
+  return false;
+}
+
+/** Only the first substantive message in a thread should mint a new idea record. */
+export function shouldExtractNewIdea(message: string, priorUserMessages: number): boolean {
+  if (priorUserMessages === 0) return !isFollowUpMessage(message);
+  if (NEW_IDEA_PATTERN.test(message)) return true;
+  return !isFollowUpMessage(message) && message.trim().length >= 40 && IDEA_HINT_PATTERN.test(message);
+}
+
 export function isCasualMessage(text: string): boolean {
   const trimmed = text.trim();
   if (ACTION_COMMAND_PATTERN.test(trimmed)) return false;

@@ -109,10 +109,13 @@ export interface ChatSession {
   title: string;
   activeAgentId: BmadAgentId;
   activeIdeaId?: string;
+  pinned?: boolean;
+  pinnedAt?: string;
   createdAt: string;
   updatedAt: string;
   messageCount?: number;
   preview?: string;
+  displayTitle?: string;
 }
 
 export interface IdeaGroup {

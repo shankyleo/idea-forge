@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Send, Sparkles, AlertCircle, Wand2 } from "lucide-react";
 import type { AgentInfo, BmadAgentId, ChatMessage, DepthScore, HonestyBreakdown, SimilarIdeaNudge } from "@/lib/types";
 import { HonestyBreakdownCard } from "@/components/HonestyBreakdownCard";
@@ -8,11 +8,18 @@ import { DepthBadge } from "@/components/DepthBadge";
 import { RelatedIdeas } from "@/components/IdeaSidebar";
 import { getAgent } from "@/lib/bmad/agents";
 import { AgentIcon } from "@/components/AgentIcon";
-import { isCasualMessage } from "@/lib/message-utils";
-import { scoreHonesty } from "@/lib/honesty-scorer";
-import { SLASH_COMMAND_HINTS, filterSlashCommandOptions, getSlashPickerQuery, parseSlashCommand, shouldShowTurnHonesty } from "@/lib/slash-commands";
+import { SLASH_COMMAND_HINTS, filterSlashCommandOptions, getSlashPickerQuery, parseSlashCommand } from "@/lib/slash-commands";
 import { SlashCommandPicker } from "@/components/SlashCommandPicker";
 import { AgentReplyHeader } from "@/components/AgentReplyHeader";
+import { EditableTitle } from "@/components/EditableTitle";
+import { HonestyScoreBadge } from "@/components/HonestyScoreBadge";
+import { HonestyScoreRing } from "@/components/HonestyScoreRing";
+import { cn } from "@/lib/utils";
+import {
+  latestVisibleChatHonesty,
+  turnHonestyByUserId,
+  type ChatTurn,
+} from "@/lib/honesty-utils";
 import {
   MarkdownContent,
   PerspectiveCards,
@@ -20,9 +27,25 @@ import {
 } from "@/components/AssistantMessage";
 import type { AgentPerspective } from "@/lib/types";
 
-const CHAT_TIMEOUT_MS = 90_000;
+function TurnHonestyPill({ score, delta }: { score: number; delta?: number }) {
+  return (
+    <div className="flex shrink-0 flex-col items-center gap-0.5 self-end pb-1">
+      <HonestyScoreRing score={score} size="sm" />
+      {typeof delta === "number" && delta !== 0 && (
+        <span
+          className={cn(
+            "text-[10px] font-semibold tabular-nums",
+            delta > 0 ? "text-emerald-400" : "text-rose-400"
+          )}
+        >
+          {delta > 0 ? `+${delta}` : delta}
+        </span>
+      )}
+    </div>
+  );
+}
 
-type ChatTurn = { user: ChatMessage; assistant?: ChatMessage };
+const CHAT_TIMEOUT_MS = 90_000;
 
 function groupIntoTurns(messages: ChatMessage[]): ChatTurn[] {
   const turns: ChatTurn[] = [];
@@ -49,31 +72,6 @@ function groupIntoTurns(messages: ChatMessage[]): ChatTurn[] {
     }
   }
   return turns;
-}
-
-function groundingForTurn(
-  turn: ChatTurn,
-  ideaHonesty: HonestyBreakdown | null,
-  isLastTurn: boolean,
-  livePanel?: AgentPerspective[] | null
-): HonestyBreakdown | undefined {
-  const slash = turn.user.content ? parseSlashCommand(turn.user.content.trim()) : null;
-  const showHonesty = !slash || shouldShowTurnHonesty(slash, isCasualMessage(turn.user.content));
-
-  if (!showHonesty) return undefined;
-  if (turn.user.honestyBreakdown) return turn.user.honestyBreakdown;
-  if (isLastTurn && ideaHonesty && !slash) return ideaHonesty;
-  if (!turn.user.content || isCasualMessage(turn.user.content)) return undefined;
-  if (slash) return undefined;
-
-  const perspectives = turn.assistant?.perspectives ?? livePanel ?? [];
-  const panelText = perspectives.map((p) => p.content).join("\n");
-  const combined = [turn.user.content, panelText].filter(Boolean).join("\n\n");
-  return scoreHonesty(combined, {
-    hasResearch: Boolean(turn.assistant?.depthScore ?? livePanel?.length),
-    depthScore: turn.assistant?.depthScore?.overall,
-    competitionLevel: turn.assistant?.depthScore?.competitionLevel,
-  });
 }
 
 function AssistantBubble({
@@ -134,6 +132,7 @@ interface ChatWindowProps {
   cursorApiConfigured: boolean;
   onIdeasUpdated: () => void;
   onSessionActivity?: () => void;
+  onSessionUpdated?: () => void;
   onContinueSimilarChat?: (sessionId: string) => void;
 }
 
@@ -143,9 +142,12 @@ export function ChatWindow({
   cursorApiConfigured,
   onIdeasUpdated,
   onSessionActivity,
+  onSessionUpdated,
   onContinueSimilarChat,
 }: ChatWindowProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [displayTitle, setDisplayTitle] = useState("New conversation");
+  const [linkedIdeaTitle, setLinkedIdeaTitle] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [statusLine, setStatusLine] = useState<string | null>(null);
@@ -181,14 +183,60 @@ export function ChatWindow({
     const res = await fetch(`/api/sessions?id=${sessionId}`);
     const data = await res.json();
     setMessages(data.messages ?? []);
+    if (data.displayTitle) setDisplayTitle(data.displayTitle as string);
+    if (data.idea?.title) setLinkedIdeaTitle(data.idea.title as string);
+    else setLinkedIdeaTitle(null);
     if (data.ideaHonesty) {
       setIdeaHonesty(data.ideaHonesty as HonestyBreakdown);
+    } else {
+      setIdeaHonesty(null);
     }
+    setIdeaHonestyDelta(undefined);
   }, [sessionId]);
+
+  const patchSession = useCallback(
+    async (patch: { title?: string; pinned?: boolean }) => {
+      const res = await fetch("/api/sessions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: sessionId, ...patch }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.displayTitle) setDisplayTitle(data.displayTitle as string);
+      onSessionUpdated?.();
+      if (patch.title) onIdeasUpdated();
+    },
+    [sessionId, onSessionUpdated, onIdeasUpdated]
+  );
 
   useEffect(() => {
     loadMessages();
   }, [loadMessages]);
+
+  const turns = useMemo(() => groupIntoTurns(messages), [messages]);
+
+  const livePanel =
+    loading && (streamingPerspectives.length > 0 || panelPerspectives.length > 0)
+      ? streamingPerspectives.length > 0
+        ? streamingPerspectives
+        : panelPerspectives
+      : null;
+
+  const turnHonestyMap = useMemo(
+    () => turnHonestyByUserId(turns, ideaHonesty, livePanel),
+    [turns, ideaHonesty, livePanel]
+  );
+
+  const headerHonesty = useMemo(() => {
+    return latestVisibleChatHonesty({
+      turns,
+      ideaHonesty,
+      liveDelta: ideaHonestyDelta,
+      isLiveTurn: loading,
+      livePanel,
+    });
+  }, [turns, ideaHonesty, ideaHonestyDelta, loading, livePanel]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -427,7 +475,6 @@ export function ChatWindow({
   };
 
   const routedAgentInfo = activeRoute ? getAgent(activeRoute.agentId) : null;
-  const turns = groupIntoTurns(messages);
 
   const selectSlashCommand = useCallback((command: string) => {
     setInput(`${command} `);
@@ -472,23 +519,39 @@ export function ChatWindow({
   return (
     <div className="flex h-full flex-col">
       <header className="border-b border-zinc-800 px-4 py-3">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h1 className="flex items-center gap-2 text-lg font-semibold text-white">
-              <Sparkles className="h-5 w-5 text-amber-400" />
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <p className="mb-1 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+              <Sparkles className="h-3 w-3 text-amber-400" />
               Idea Forge
-            </h1>
-            <p className="flex items-center gap-1.5 text-xs text-zinc-500">
+            </p>
+            <EditableTitle
+              value={displayTitle}
+              onSave={(title) => patchSession({ title })}
+              inputClassName="text-lg"
+              className="max-w-xl"
+            />
+            {linkedIdeaTitle && linkedIdeaTitle !== displayTitle && (
+              <p className="mt-0.5 truncate text-xs text-zinc-500">
+                Idea: {linkedIdeaTitle}
+              </p>
+            )}
+            <p className="mt-1 flex items-center gap-1.5 text-xs text-zinc-500">
               <Wand2 className="h-3 w-3" />
               Auto-routing · {agents.length} BMAD agents on call
             </p>
           </div>
-          {!cursorApiConfigured && (
-            <div className="flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-200">
-              <AlertCircle className="h-3.5 w-3.5" />
-              Add CURSOR_API_KEY for live agents
-            </div>
-          )}
+          <div className="flex shrink-0 items-center gap-2">
+            {headerHonesty && (
+              <HonestyScoreBadge score={headerHonesty.score} delta={headerHonesty.delta} />
+            )}
+            {!cursorApiConfigured && (
+              <div className="flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-200">
+                <AlertCircle className="h-3.5 w-3.5" />
+                Add CURSOR_API_KEY for live agents
+              </div>
+            )}
+          </div>
         </div>
         {activeRoute && routedAgentInfo && (
           <div className="mt-3">
@@ -594,12 +657,12 @@ export function ChatWindow({
                   ? streamingPerspectives
                   : panelPerspectives
                 : null;
-            const grounding = groundingForTurn(
-              turn,
-              ideaHonesty,
-              isLastTurn,
-              livePerspectives
-            );
+            const turnHonesty = turnHonestyMap.get(turn.user.id);
+            const grounding = turnHonesty?.breakdown;
+            const turnDelta =
+              isLiveTurn && typeof ideaHonestyDelta === "number"
+                ? ideaHonestyDelta
+                : turnHonesty?.delta;
             const groundingVariant =
               turn.assistant?.agentId === "honesty-coach" ? "coach" : "grounding";
 
@@ -619,7 +682,10 @@ export function ChatWindow({
             return (
               <article key={turn.user.id} className="space-y-3">
                 {turn.user.content && (
-                  <div className="flex justify-end">
+                  <div className="flex items-end justify-end gap-2">
+                    {turnHonesty && (
+                      <TurnHonestyPill score={turnHonesty.score} delta={turnDelta} />
+                    )}
                     <div className="max-w-lg rounded-2xl bg-indigo-600/20 px-4 py-3 text-indigo-50 ring-1 ring-indigo-500/20">
                       <p className="whitespace-pre-wrap text-sm leading-relaxed">{turn.user.content}</p>
                     </div>
@@ -636,8 +702,8 @@ export function ChatWindow({
                   <HonestyBreakdownCard
                     breakdown={grounding}
                     variant={groundingVariant}
-                    defaultExpanded
-                    delta={isLiveTurn ? ideaHonestyDelta : undefined}
+                    defaultExpanded={false}
+                    delta={turnDelta}
                   />
                 )}
 

@@ -7,9 +7,12 @@ import {
   MessagesSquare,
   MessageSquarePlus,
   Network,
+  Pin,
 } from "lucide-react";
 import type { ChatSession, IdeaGroup, IdeaRecord } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { EditableTitle } from "@/components/EditableTitle";
+import { normalizeConversationTitle } from "@/lib/session-titles";
 
 export type SidebarTab = "chat" | "idea" | "history";
 
@@ -38,6 +41,8 @@ interface IdeaSidebarProps {
   onSelectSession: (sessionId: string) => void;
   onNewSession: () => void;
   onClearIdea: () => void;
+  onRenameSession?: (sessionId: string, title: string) => void | Promise<void>;
+  onTogglePinSession?: (sessionId: string, pinned: boolean) => void | Promise<void>;
 }
 
 function formatWhen(iso: string) {
@@ -64,8 +69,79 @@ export function IdeaSidebar({
   onSelectSession,
   onNewSession,
   onClearIdea,
+  onRenameSession,
+  onTogglePinSession,
 }: IdeaSidebarProps) {
   const totalIdeas = groups.reduce((n, g) => n + g.ideas.length, 0);
+  const pinnedSessions = sessions.filter((s) => s.pinned);
+  const unpinnedSessions = sessions.filter((s) => !s.pinned);
+
+  const renderSession = (session: ChatSession) => {
+    const label = session.displayTitle ?? session.title;
+
+    return (
+      <li key={session.id}>
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => onSelectSession(session.id)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onSelectSession(session.id);
+            }
+          }}
+          className={cn(
+            "rounded-lg px-3 py-2.5 transition-colors cursor-pointer",
+            activeSessionId === session.id
+              ? "bg-indigo-600/15 ring-1 ring-indigo-500/30"
+              : "hover:bg-zinc-800/60"
+          )}
+        >
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-2">
+                <EditableTitle
+                  value={label}
+                  onSave={(title) => onRenameSession?.(session.id, title)}
+                  inputClassName="text-sm"
+                  disabled={!onRenameSession}
+                />
+                <span className="shrink-0 text-[10px] text-zinc-600">
+                  {formatWhen(session.updatedAt)}
+                </span>
+              </div>
+              {session.preview && (
+                <p className="mt-0.5 text-xs text-zinc-500 line-clamp-2">{session.preview}</p>
+              )}
+              <p className="mt-1 text-[10px] text-zinc-600">
+                {session.messageCount ?? 0} messages
+              </p>
+            </div>
+            {onTogglePinSession && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void onTogglePinSession(session.id, !session.pinned);
+                }}
+                className={cn(
+                  "mt-0.5 shrink-0 rounded p-1 transition-colors",
+                  session.pinned
+                    ? "text-amber-400 hover:bg-amber-500/10"
+                    : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300"
+                )}
+                title={session.pinned ? "Unpin conversation" : "Pin conversation"}
+                aria-label={session.pinned ? "Unpin conversation" : "Pin conversation"}
+              >
+                <Pin className={cn("h-3.5 w-3.5", session.pinned && "fill-current")} />
+              </button>
+            )}
+          </div>
+        </div>
+      </li>
+    );
+  };
 
   const tabs: Array<{ id: SidebarTab; label: string; icon: typeof History }> = [
     { id: "chat", label: "Chat", icon: MessagesSquare },
@@ -108,10 +184,10 @@ export function IdeaSidebar({
           </div>
           <div className="border-b border-zinc-800 px-4 py-2">
             <p className="text-xs text-zinc-500">
-              {totalIdeas} ideas captured from your chats
+              {totalIdeas} idea{totalIdeas === 1 ? "" : "s"} from your chats
             </p>
             <p className="mt-0.5 text-[10px] text-zinc-600">
-              Open the Idea tab for the map · History for past conversations
+              One idea per conversation — follow-ups stay in the same thread
             </p>
           </div>
 
@@ -134,7 +210,9 @@ export function IdeaSidebar({
                     >
                       <div className="flex items-center gap-1.5">
                         <Lightbulb className="h-3 w-3 shrink-0 text-amber-400/80" />
-                        <span className="font-medium line-clamp-2">{idea.title}</span>
+                        <span className="font-medium line-clamp-2">
+                          {normalizeConversationTitle(idea.title)}
+                        </span>
                       </div>
                       {idea.tags.length > 0 && (
                         <div className="mt-1 flex flex-wrap gap-1 pl-4">
@@ -201,35 +279,20 @@ export function IdeaSidebar({
               <p className="px-2 py-4 text-xs text-zinc-500">No past conversations yet.</p>
             ) : (
               <ul className="space-y-1">
-                {sessions.map((session) => (
-                  <li key={session.id}>
-                    <button
-                      type="button"
-                      onClick={() => onSelectSession(session.id)}
-                      className={cn(
-                        "w-full rounded-lg px-3 py-2.5 text-left transition-colors",
-                        activeSessionId === session.id
-                          ? "bg-indigo-600/15 ring-1 ring-indigo-500/30"
-                          : "hover:bg-zinc-800/60"
-                      )}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium text-zinc-200 line-clamp-1">
-                          {session.title}
-                        </span>
-                        <span className="shrink-0 text-[10px] text-zinc-600">
-                          {formatWhen(session.updatedAt)}
-                        </span>
-                      </div>
-                      {session.preview && (
-                        <p className="mt-0.5 text-xs text-zinc-500 line-clamp-2">{session.preview}</p>
-                      )}
-                      <p className="mt-1 text-[10px] text-zinc-600">
-                        {session.messageCount ?? 0} messages
-                      </p>
-                    </button>
-                  </li>
-                ))}
+                {pinnedSessions.length > 0 && (
+                  <>
+                    <li className="px-3 pt-1 text-[10px] font-medium uppercase tracking-wide text-amber-500/80">
+                      Pinned
+                    </li>
+                    {pinnedSessions.map(renderSession)}
+                    {unpinnedSessions.length > 0 && (
+                      <li className="px-3 pt-3 text-[10px] font-medium uppercase tracking-wide text-zinc-600">
+                        Recent
+                      </li>
+                    )}
+                  </>
+                )}
+                {unpinnedSessions.map(renderSession)}
               </ul>
             )}
           </div>

@@ -10,7 +10,10 @@ import {
   getIdea,
   updateSession,
   getIdeaHonestySnapshot,
+  upsertIdea,
+  repairGenericSessionTitles,
 } from "@/lib/db";
+import { resolveSessionDisplayTitle } from "@/lib/session-titles";
 import type { BmadAgentId } from "@/lib/types";
 
 export async function GET(request: Request) {
@@ -46,10 +49,18 @@ export async function GET(request: Request) {
     const ideaId =
       session.activeIdeaId ??
       [...messages].reverse().find((m) => m.ideaId)?.ideaId;
+    const idea = ideaId ? getIdea(ideaId) ?? undefined : undefined;
     const ideaHonesty = ideaId ? getIdeaHonestySnapshot(ideaId) ?? undefined : undefined;
-    return NextResponse.json({ session, messages, ideaHonesty });
+    const firstUserMessage = messages.find((m) => m.role === "user")?.content;
+    const displayTitle = resolveSessionDisplayTitle({
+      sessionTitle: session.title,
+      ideaTitle: idea?.title,
+      firstUserMessage,
+    });
+    return NextResponse.json({ session, messages, ideaHonesty, idea, displayTitle });
   }
 
+  repairGenericSessionTitles();
   const sessions = listSessionsWithMeta();
 
   if (resume === "1") {
@@ -90,6 +101,7 @@ export async function PATCH(request: Request) {
     id: string;
     title?: string;
     activeIdeaId?: string | null;
+    pinned?: boolean;
   };
 
   if (!body.id) {
@@ -102,7 +114,31 @@ export async function PATCH(request: Request) {
   updateSession(body.id, {
     title: body.title,
     activeIdeaId: body.activeIdeaId === null ? undefined : body.activeIdeaId,
+    pinned: body.pinned,
   });
 
-  return NextResponse.json({ session: getSession(body.id) });
+  if (body.title?.trim() && session.activeIdeaId) {
+    const idea = getIdea(session.activeIdeaId);
+    if (idea) {
+      upsertIdea({
+        id: idea.id,
+        title: body.title.trim().slice(0, 200),
+        summary: idea.summary,
+        tags: idea.tags,
+        status: idea.status,
+      });
+    }
+  }
+
+  const updated = getSession(body.id)!;
+  const idea = updated.activeIdeaId ? getIdea(updated.activeIdeaId) ?? undefined : undefined;
+  const messages = getMessages(body.id);
+  const firstUserMessage = messages.find((m) => m.role === "user")?.content;
+  const displayTitle = resolveSessionDisplayTitle({
+    sessionTitle: updated.title,
+    ideaTitle: idea?.title,
+    firstUserMessage,
+  });
+
+  return NextResponse.json({ session: updated, displayTitle });
 }

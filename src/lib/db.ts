@@ -13,6 +13,11 @@ import type {
 } from "@/lib/types";
 import { slugify } from "@/lib/utils";
 import { buildIdeaGroups } from "@/lib/idea-groups";
+import {
+  isGenericSessionTitle,
+  normalizeConversationTitle,
+  resolveSessionDisplayTitle,
+} from "@/lib/session-titles";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "idea-forge.db");
@@ -107,6 +112,16 @@ function initSchema(database: Database.Database) {
   }
   try {
     database.exec(`ALTER TABLE ideas ADD COLUMN honesty_snapshot TEXT`);
+  } catch {
+    // column already exists
+  }
+  try {
+    database.exec(`ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    // column already exists
+  }
+  try {
+    database.exec(`ALTER TABLE sessions ADD COLUMN pinned_at TEXT`);
   } catch {
     // column already exists
   }
@@ -226,6 +241,8 @@ export function extractAndSaveIdea(content: string, sessionId: string): IdeaReco
     title = firstSentence.slice(0, 100);
   }
 
+  title = normalizeConversationTitle(title, 80);
+
   const slug = slugify(title);
   const existing = listIdeas().find(
     (i) => slugify(i.title) === slug || i.title.toLowerCase() === title.toLowerCase()
@@ -330,11 +347,31 @@ export function getSessionPreview(sessionId: string): string {
   return row?.content?.slice(0, 80) ?? "";
 }
 
+export function getSessionFirstUserMessage(sessionId: string): string {
+  const row = getDb()
+    .prepare(
+      `SELECT content FROM messages WHERE session_id = ? AND role = 'user' ORDER BY created_at ASC LIMIT 1`
+    )
+    .get(sessionId) as { content: string } | undefined;
+  return row?.content ?? "";
+}
+
+export function getSessionDisplayTitle(session: ChatSession): string {
+  const idea = session.activeIdeaId ? getIdea(session.activeIdeaId) : null;
+  const firstUserMessage = getSessionFirstUserMessage(session.id);
+  return resolveSessionDisplayTitle({
+    sessionTitle: session.title,
+    ideaTitle: idea?.title,
+    firstUserMessage: firstUserMessage || undefined,
+  });
+}
+
 export function listSessionsWithMeta(): ChatSession[] {
   return listSessions().map((session) => ({
     ...session,
     messageCount: getSessionMessageCount(session.id),
     preview: getSessionPreview(session.id),
+    displayTitle: getSessionDisplayTitle(session),
   }));
 }
 
@@ -464,7 +501,8 @@ export function getMostRecentSessionWithMessages(): ChatSession | null {
 
 export function createSessionForIdea(ideaId: string): ChatSession {
   const idea = getIdea(ideaId);
-  const session = createSession(idea?.title.slice(0, 60) ?? "Idea thread", "deep-recon");
+  const title = idea ? normalizeConversationTitle(idea.title) : "Idea thread";
+  const session = createSession(title.slice(0, 60), "deep-recon");
   updateSession(session.id, { activeIdeaId: ideaId });
   return getSession(session.id)!;
 }
@@ -487,16 +525,30 @@ export function createSession(title: string, agentId: BmadAgentId): ChatSession 
     id: uuidv4(),
     title,
     activeAgentId: agentId,
+    pinned: false,
     createdAt: now,
     updatedAt: now,
   };
   getDb()
     .prepare(
-      `INSERT INTO sessions (id, title, active_agent_id, active_idea_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO sessions (id, title, active_agent_id, active_idea_id, pinned, pinned_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(session.id, session.title, session.activeAgentId, null, now, now);
+    .run(session.id, session.title, session.activeAgentId, null, 0, null, now, now);
   return session;
+}
+
+function mapSessionRow(row: Record<string, unknown>): ChatSession {
+  return {
+    id: row.id as string,
+    title: row.title as string,
+    activeAgentId: row.active_agent_id as BmadAgentId,
+    activeIdeaId: (row.active_idea_id as string) ?? undefined,
+    pinned: Boolean(row.pinned),
+    pinnedAt: (row.pinned_at as string) ?? undefined,
+    createdAt: row.created_at as string,
+    updatedAt: row.updated_at as string,
+  };
 }
 
 export function getSession(id: string): ChatSession | null {
@@ -504,50 +556,96 @@ export function getSession(id: string): ChatSession | null {
     | Record<string, unknown>
     | undefined;
   if (!row) return null;
-  return {
-    id: row.id as string,
-    title: row.title as string,
-    activeAgentId: row.active_agent_id as BmadAgentId,
-    activeIdeaId: (row.active_idea_id as string) ?? undefined,
-    createdAt: row.created_at as string,
-    updatedAt: row.updated_at as string,
-  };
+  return mapSessionRow(row);
 }
 
 export function listSessions(): ChatSession[] {
   const rows = getDb()
-    .prepare("SELECT * FROM sessions ORDER BY updated_at DESC LIMIT 50")
+    .prepare(
+      `SELECT * FROM sessions
+       ORDER BY pinned DESC, COALESCE(pinned_at, updated_at) DESC, updated_at DESC
+       LIMIT 50`
+    )
     .all() as Record<string, unknown>[];
-  return rows.map((row) => ({
-    id: row.id as string,
-    title: row.title as string,
-    activeAgentId: row.active_agent_id as BmadAgentId,
-    activeIdeaId: (row.active_idea_id as string) ?? undefined,
-    createdAt: row.created_at as string,
-    updatedAt: row.updated_at as string,
-  }));
+  return rows.map(mapSessionRow);
 }
 
 export function updateSession(
   id: string,
-  patch: Partial<Pick<ChatSession, "title" | "activeAgentId">> & { activeIdeaId?: string | null }
+  patch: Partial<Pick<ChatSession, "title" | "activeAgentId" | "pinned" | "pinnedAt">> & {
+    activeIdeaId?: string | null;
+  }
 ) {
   const now = new Date().toISOString();
   const session = getSession(id);
   if (!session) return;
+
   const nextIdeaId =
     patch.activeIdeaId !== undefined ? patch.activeIdeaId ?? null : session.activeIdeaId ?? null;
+  const nextPinned = patch.pinned !== undefined ? (patch.pinned ? 1 : 0) : session.pinned ? 1 : 0;
+  const nextPinnedAt =
+    patch.pinnedAt !== undefined
+      ? patch.pinnedAt
+      : patch.pinned === true
+        ? now
+        : patch.pinned === false
+          ? null
+          : session.pinnedAt ?? null;
+
   getDb()
     .prepare(
-      `UPDATE sessions SET title = ?, active_agent_id = ?, active_idea_id = ?, updated_at = ? WHERE id = ?`
+      `UPDATE sessions SET title = ?, active_agent_id = ?, active_idea_id = ?, pinned = ?, pinned_at = ?, updated_at = ? WHERE id = ?`
     )
     .run(
       patch.title ?? session.title,
       patch.activeAgentId ?? session.activeAgentId,
       nextIdeaId,
+      nextPinned,
+      nextPinnedAt,
       now,
       id
     );
+}
+
+/** Backfill readable titles for sessions that still have placeholder names. */
+export function repairGenericSessionTitles(): number {
+  let fixed = 0;
+
+  for (const session of listSessions()) {
+    if (!isGenericSessionTitle(session.title)) continue;
+
+    const idea = session.activeIdeaId ? getIdea(session.activeIdeaId) : null;
+    let nextTitle: string | null = null;
+
+    if (idea) {
+      nextTitle = normalizeConversationTitle(idea.title);
+      if (idea.title !== nextTitle) {
+        upsertIdea({
+          id: idea.id,
+          title: nextTitle,
+          summary: idea.summary,
+          tags: idea.tags,
+          status: idea.status,
+        });
+      }
+    } else {
+      const firstUser = getDb()
+        .prepare(
+          `SELECT content FROM messages WHERE session_id = ? AND role = 'user' ORDER BY created_at ASC LIMIT 1`
+        )
+        .get(session.id) as { content: string } | undefined;
+      if (firstUser?.content) {
+        nextTitle = normalizeConversationTitle(firstUser.content);
+      }
+    }
+
+    if (nextTitle && !isGenericSessionTitle(nextTitle) && nextTitle !== session.title) {
+      updateSession(session.id, { title: nextTitle.slice(0, 60) });
+      fixed += 1;
+    }
+  }
+
+  return fixed;
 }
 
 export function updateMessageHonestyBreakdown(messageId: string, breakdown: HonestyBreakdown) {
@@ -656,4 +754,206 @@ export function listAllIdeaThoughts(): IdeaThought[] {
     out.push(...getThoughtsForIdea(idea.id));
   }
   return out.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+function ideaIdsLinkedToSession(sessionId: string): string[] {
+  const database = getDb();
+  const fromMessages = (
+    database
+      .prepare(
+        `SELECT DISTINCT idea_id as id FROM messages WHERE session_id = ? AND idea_id IS NOT NULL`
+      )
+      .all(sessionId) as Array<{ id: string }>
+  ).map((r) => r.id);
+
+  const userTexts = getMessages(sessionId)
+    .filter((m) => m.role === "user")
+    .map((m) => m.content.toLowerCase());
+
+  const orphans = listIdeas()
+    .filter((idea) => {
+      if (fromMessages.includes(idea.id)) return false;
+      const fragment = idea.title.toLowerCase().trim();
+      if (fragment.length < 8) return false;
+      return userTexts.some(
+        (text) =>
+          text.includes(fragment.slice(0, Math.min(24, fragment.length))) ||
+          (text.length >= 12 && fragment.includes(text.slice(0, Math.min(24, text.length))))
+      );
+    })
+    .map((i) => i.id);
+
+  return [...new Set([...fromMessages, ...orphans])];
+}
+
+function scoreIdeaAsCanonical(ideaId: string, sessionId: string): number {
+  const idea = getIdea(ideaId);
+  if (!idea) return -1;
+
+  const row = getDb()
+    .prepare(
+      `SELECT COUNT(*) as c FROM messages WHERE session_id = ? AND idea_id = ?`
+    )
+    .get(sessionId, ideaId) as { c: number };
+
+  let score = row.c * 100 + idea.title.length + idea.summary.length * 0.1;
+  if (/storyboard|story board|generate.*stor/i.test(`${idea.title} ${idea.summary}`)) {
+    score += 250;
+  }
+  if (idea.title.length < 18) score -= 80;
+  if (/^(what|how|not sure|and |maybe)/i.test(idea.title)) score -= 100;
+  return score;
+}
+
+function repointIdeaLinks(
+  database: Database.Database,
+  canonicalId: string,
+  dupId: string
+): void {
+  const asIdea = database
+    .prepare(`SELECT related_id, score, reason FROM idea_links WHERE idea_id = ?`)
+    .all(dupId) as Array<{ related_id: string; score: number; reason: string }>;
+
+  for (const row of asIdea) {
+    const relatedId = row.related_id === dupId ? canonicalId : row.related_id;
+    if (relatedId === canonicalId) {
+      database
+        .prepare(`DELETE FROM idea_links WHERE idea_id = ? AND related_id = ?`)
+        .run(dupId, row.related_id);
+      continue;
+    }
+    const existing = database
+      .prepare(`SELECT 1 FROM idea_links WHERE idea_id = ? AND related_id = ?`)
+      .get(canonicalId, relatedId);
+    if (existing) {
+      database
+        .prepare(`DELETE FROM idea_links WHERE idea_id = ? AND related_id = ?`)
+        .run(dupId, row.related_id);
+    } else {
+      database
+        .prepare(
+          `INSERT INTO idea_links (idea_id, related_id, score, reason) VALUES (?, ?, ?, ?)`
+        )
+        .run(canonicalId, relatedId, row.score, row.reason);
+      database
+        .prepare(`DELETE FROM idea_links WHERE idea_id = ? AND related_id = ?`)
+        .run(dupId, row.related_id);
+    }
+  }
+
+  const asRelated = database
+    .prepare(`SELECT idea_id, score, reason FROM idea_links WHERE related_id = ?`)
+    .all(dupId) as Array<{ idea_id: string; score: number; reason: string }>;
+
+  for (const row of asRelated) {
+    const ideaId = row.idea_id === dupId ? canonicalId : row.idea_id;
+    if (ideaId === canonicalId) {
+      database
+        .prepare(`DELETE FROM idea_links WHERE idea_id = ? AND related_id = ?`)
+        .run(row.idea_id, dupId);
+      continue;
+    }
+    const existing = database
+      .prepare(`SELECT 1 FROM idea_links WHERE idea_id = ? AND related_id = ?`)
+      .get(ideaId, canonicalId);
+    if (existing) {
+      database
+        .prepare(`DELETE FROM idea_links WHERE idea_id = ? AND related_id = ?`)
+        .run(row.idea_id, dupId);
+    } else {
+      database
+        .prepare(
+          `INSERT INTO idea_links (idea_id, related_id, score, reason) VALUES (?, ?, ?, ?)`
+        )
+        .run(ideaId, canonicalId, row.score, row.reason);
+      database
+        .prepare(`DELETE FROM idea_links WHERE idea_id = ? AND related_id = ?`)
+        .run(row.idea_id, dupId);
+    }
+  }
+}
+
+export function mergeIdeasInto(canonicalId: string, duplicateIds: string[]): void {
+  const database = getDb();
+  const canonical = getIdea(canonicalId);
+  if (!canonical) return;
+
+  let bestTitle = canonical.title;
+  let bestSummary = canonical.summary;
+  const mergedTags = new Set(canonical.tags);
+
+  for (const dupId of duplicateIds) {
+    if (dupId === canonicalId) continue;
+    const dup = getIdea(dupId);
+    if (!dup) continue;
+
+    if (dup.summary.length > bestSummary.length) bestSummary = dup.summary;
+    if (dup.title.length > bestTitle.length && !/^(what|and |not sure)/i.test(dup.title)) {
+      bestTitle = dup.title;
+    }
+    dup.tags.forEach((t) => mergedTags.add(t));
+
+    database.prepare(`UPDATE messages SET idea_id = ? WHERE idea_id = ?`).run(canonicalId, dupId);
+    database
+      .prepare(`UPDATE sessions SET active_idea_id = ? WHERE active_idea_id = ?`)
+      .run(canonicalId, dupId);
+
+    repointIdeaLinks(database, canonicalId, dupId);
+
+    const dupHonesty = database
+      .prepare(`SELECT honesty_snapshot FROM ideas WHERE id = ?`)
+      .get(dupId) as { honesty_snapshot: string | null } | undefined;
+    const canonHonesty = database
+      .prepare(`SELECT honesty_snapshot FROM ideas WHERE id = ?`)
+      .get(canonicalId) as { honesty_snapshot: string | null } | undefined;
+    if (dupHonesty?.honesty_snapshot && !canonHonesty?.honesty_snapshot) {
+      database
+        .prepare(`UPDATE ideas SET honesty_snapshot = ? WHERE id = ?`)
+        .run(dupHonesty.honesty_snapshot, canonicalId);
+    }
+
+    database.prepare(`DELETE FROM ideas WHERE id = ?`).run(dupId);
+  }
+
+  upsertIdea({
+    id: canonicalId,
+    title: bestTitle.slice(0, 200),
+    summary: bestSummary.slice(0, 500),
+    tags: [...mergedTags],
+  });
+}
+
+/** Merge duplicate idea records that belong to the same conversation. */
+export function consolidateDuplicateSessionIdeas(): { sessionsFixed: number; ideasMerged: number } {
+  let sessionsFixed = 0;
+  let ideasMerged = 0;
+
+  for (const session of listSessions()) {
+    const ideaIds = ideaIdsLinkedToSession(session.id);
+    if (ideaIds.length === 0) continue;
+
+    const ranked = ideaIds
+      .map((id) => ({ id, score: scoreIdeaAsCanonical(id, session.id) }))
+      .filter((x) => x.score > -1)
+      .sort((a, b) => b.score - a.score);
+
+    if (ranked.length === 0) continue;
+
+    const canonicalId = ranked[0].id;
+    const duplicateIds = ranked.slice(1).map((x) => x.id);
+
+    if (duplicateIds.length > 0) {
+      mergeIdeasInto(canonicalId, duplicateIds);
+      sessionsFixed += 1;
+      ideasMerged += duplicateIds.length;
+    }
+
+    const canonical = getIdea(canonicalId);
+    updateSession(session.id, {
+      activeIdeaId: canonicalId,
+      title: canonical?.title.slice(0, 60) ?? session.title,
+    });
+  }
+
+  return { sessionsFixed, ideasMerged };
 }

@@ -14,10 +14,10 @@ import {
 import { streamAgentResponse } from "@/lib/cursor-agent";
 import { findRelatedIdeas, linkRelatedIdeas } from "@/lib/idea-linker";
 import { runDeepRecon } from "@/lib/web-research";
-import { shouldRunWebResearch, shouldRunPanelResearch, isCasualMessage } from "@/lib/message-utils";
+import { shouldRunWebResearch, shouldRunPanelResearch, isCasualMessage, shouldExtractNewIdea } from "@/lib/message-utils";
 import { runHonestyBreakdown } from "@/lib/honesty-agent";
 import { routeMessage } from "@/lib/agent-router";
-import { parseSlashCommand, slashRouteReason, shouldRunTeamPanel, shouldShowTurnHonesty, shouldTrackIdeaHonesty, shouldRunSlashAwareResearch } from "@/lib/slash-commands";
+import { parseSlashCommand, slashRouteReason, shouldRunTeamPanel, shouldTrackIdeaHonesty, shouldRunSlashAwareResearch } from "@/lib/slash-commands";
 import { runPanelPerspectives } from "@/lib/panel-agents";
 import { computeIdeaHonestyUpdate } from "@/lib/idea-honesty";
 import { scoreHonesty } from "@/lib/honesty-scorer";
@@ -111,8 +111,15 @@ export async function POST(request: Request) {
         : message;
 
   const casual = slash ? false : isCasualMessage(message);
-  const extractedIdea = casual ? null : extractAndSaveIdea(workingMessage, sessionId);
-  let ideaId = extractedIdea?.id ?? clientIdeaId ?? session.activeIdeaId;
+  const priorUserMessages = historyMessages.filter((m) => m.role === "user").length;
+  const mintNewIdea =
+    !casual &&
+    !session.activeIdeaId &&
+    !clientIdeaId &&
+    shouldExtractNewIdea(workingMessage, priorUserMessages);
+
+  const extractedIdea = mintNewIdea ? extractAndSaveIdea(workingMessage, sessionId) : null;
+  let ideaId = clientIdeaId ?? session.activeIdeaId ?? extractedIdea?.id;
 
   if (extractedIdea && !session.activeIdeaId && !clientIdeaId) {
     updateSession(sessionId, {
@@ -120,6 +127,8 @@ export async function POST(request: Request) {
       title: extractedIdea.title.slice(0, 60),
     });
     ideaId = extractedIdea.id;
+  } else if (session.activeIdeaId && !ideaId) {
+    ideaId = session.activeIdeaId;
   } else if (clientIdeaId && session.activeIdeaId !== clientIdeaId) {
     updateSession(sessionId, { activeIdeaId: clientIdeaId });
     ideaId = clientIdeaId;
@@ -253,7 +262,7 @@ export async function POST(request: Request) {
           honestyNarrative = result.narrative;
         }
 
-        if (shouldShowTurnHonesty(slash, casual) && agentId !== "honesty-coach") {
+        if (!casual && agentId !== "honesty-coach") {
           turnHonesty = scoreHonesty(
             buildHonestyInput(workingMessage, perspectives),
             honestyContext(depthScore, reconResult)
@@ -269,7 +278,7 @@ export async function POST(request: Request) {
             depthScore: depthScore?.overall ?? reconResult?.depth.depthScore,
             hasResearch: Boolean(reconResult),
           });
-          turnHonesty = breakdown;
+          if (!turnHonesty) turnHonesty = breakdown;
           ideaHonestyDelta = delta;
           if (agentId === "honesty-coach" && honestyBreakdown) {
             honestyBreakdown = breakdown;
@@ -279,7 +288,7 @@ export async function POST(request: Request) {
         const userHonestyBreakdown =
           agentId === "honesty-coach" && honestyBreakdown
             ? honestyBreakdown
-            : shouldShowTurnHonesty(slash, casual)
+            : !casual
               ? turnHonesty
               : undefined;
 
@@ -343,8 +352,17 @@ export async function POST(request: Request) {
           }
         }
 
-        if (shouldTrackIdeaHonesty(slash, casual) && fullResponse.trim()) {
-          if (ideaId) {
+        if (!casual) {
+          const finalHonesty =
+            agentId === "honesty-coach" && honestyBreakdown
+              ? honestyBreakdown
+              : scoreHonesty(
+                  buildHonestyInput(workingMessage, perspectives, fullResponse.trim()),
+                  honestyContext(depthScore, reconResult)
+                );
+          updateMessageHonestyBreakdown(userMsgId, finalHonesty);
+
+          if (shouldTrackIdeaHonesty(slash, casual) && ideaId) {
             computeIdeaHonestyUpdate({
               ideaId,
               userMessage: workingMessage,
@@ -354,18 +372,17 @@ export async function POST(request: Request) {
               depthScore: depthScore?.overall ?? reconResult?.depth.depthScore,
               hasResearch: Boolean(reconResult),
             });
-            const finalGrounding = getIdeaHonestySnapshot(ideaId);
-            if (finalGrounding) {
-              updateMessageHonestyBreakdown(userMsgId, finalGrounding);
-            }
-          } else {
-            const finalHonesty = scoreHonesty(
-              buildHonestyInput(workingMessage, perspectives, fullResponse.trim()),
-              honestyContext(depthScore, reconResult)
-            );
-            updateMessageHonestyBreakdown(userMsgId, finalHonesty);
           }
         }
+
+        const finalUserHonesty = !casual
+          ? agentId === "honesty-coach" && honestyBreakdown
+            ? honestyBreakdown
+            : scoreHonesty(
+                buildHonestyInput(workingMessage, perspectives, fullResponse.trim()),
+                honestyContext(depthScore, reconResult)
+              )
+          : undefined;
 
         saveMessage({
           id: assistantMsgId,
@@ -389,11 +406,7 @@ export async function POST(request: Request) {
           ideaHonesty: shouldTrackIdeaHonesty(slash, casual) && ideaId
             ? getIdeaHonestySnapshot(ideaId) ?? undefined
             : undefined,
-          honestyBreakdown: shouldTrackIdeaHonesty(slash, casual)
-            ? ideaId
-              ? getIdeaHonestySnapshot(ideaId) ?? userHonestyBreakdown
-              : userHonestyBreakdown
-            : userHonestyBreakdown,
+          honestyBreakdown: finalUserHonesty ?? userHonestyBreakdown,
           userMessageId: userMsgId,
         });
       } catch (error) {

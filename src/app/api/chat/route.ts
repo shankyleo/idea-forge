@@ -8,11 +8,11 @@ import {
   getIdea,
 } from "@/lib/db";
 import { streamAgentResponse } from "@/lib/cursor-agent";
-import { scoreHonesty } from "@/lib/honesty-scorer";
 import { findRelatedIdeas, linkRelatedIdeas } from "@/lib/idea-linker";
 import { runDeepRecon } from "@/lib/web-research";
 import { shouldRunWebResearch, isCasualMessage } from "@/lib/message-utils";
-import type { BmadAgentId, DepthScore } from "@/lib/types";
+import { runHonestyBreakdown } from "@/lib/honesty-agent";
+import type { BmadAgentId, DepthScore, HonestyBreakdown } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -44,7 +44,6 @@ export async function POST(request: Request) {
   updateSession(sessionId, { activeAgentId: agentId });
 
   const casual = isCasualMessage(message);
-  const honestyScore = casual ? undefined : scoreHonesty(message);
   const extractedIdea = casual ? null : extractAndSaveIdea(message, sessionId);
   const ideaId = extractedIdea?.id ?? session.activeIdeaId;
 
@@ -72,6 +71,8 @@ export async function POST(request: Request) {
 
   let researchBlock: string | undefined;
   let depthScore: DepthScore | undefined;
+  let honestyBreakdown: HonestyBreakdown | undefined;
+  let honestyNarrative: string | undefined;
 
   if (shouldRunWebResearch(agentId, message)) {
     const recon = await runDeepRecon(message);
@@ -84,13 +85,19 @@ export async function POST(request: Request) {
     };
   }
 
+  if (agentId === "honesty-coach" && !casual) {
+    const result = await runHonestyBreakdown(message);
+    honestyBreakdown = result.breakdown ?? undefined;
+    honestyNarrative = result.narrative;
+  }
+
   const userMsgId = uuidv4();
   saveMessage({
     id: userMsgId,
     sessionId,
     role: "user",
     content: message,
-    honestyScore,
+    honestyBreakdown,
     depthScore,
     ideaId,
     relatedIdeas: relatedForClient,
@@ -118,7 +125,7 @@ export async function POST(request: Request) {
 
       send({
         type: "meta",
-        honestyScore,
+        honestyBreakdown,
         depthScore,
         relatedIdeas: relatedForClient,
         ideaId,
@@ -129,19 +136,25 @@ export async function POST(request: Request) {
       });
 
       try {
-        for await (const chunk of streamAgentResponse({
-          agentId,
-          message,
-          history: history.slice(0, -1),
-          relatedIdeas: relatedForPrompt,
-          honestyScore,
-          skipScoring: casual,
-          ideaTitle: extractedIdea?.title ?? ideaTitle,
-          researchBlock,
-          depthScore,
-        })) {
-          fullResponse += chunk;
-          send({ type: "chunk", content: chunk });
+        if (agentId === "honesty-coach" && !casual && honestyNarrative) {
+          fullResponse = honestyNarrative;
+          const chunks = honestyNarrative.split(/(?<=\.|!|\?|\n)\s+/);
+          for (const chunk of chunks) {
+            send({ type: "chunk", content: chunk + " " });
+          }
+        } else {
+          for await (const chunk of streamAgentResponse({
+            agentId,
+            message,
+            history: history.slice(0, -1),
+            relatedIdeas: relatedForPrompt,
+            ideaTitle: extractedIdea?.title ?? ideaTitle,
+            researchBlock,
+            depthScore,
+          })) {
+            fullResponse += chunk;
+            send({ type: "chunk", content: chunk });
+          }
         }
 
         saveMessage({

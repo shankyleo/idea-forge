@@ -7,7 +7,7 @@ import type {
   ChatMessage,
   ChatSession,
   DepthScore,
-  HonestyScore,
+  HonestyBreakdown,
   IdeaLink,
   IdeaRecord,
 } from "@/lib/types";
@@ -75,6 +75,11 @@ function initSchema(database: Database.Database) {
   `);
 
   try {
+    database.exec(`ALTER TABLE messages ADD COLUMN honesty_breakdown TEXT`);
+  } catch {
+    // column already exists
+  }
+  try {
     database.exec(`ALTER TABLE messages ADD COLUMN depth_score TEXT`);
   } catch {
     // column already exists
@@ -98,6 +103,26 @@ export function listIdeas(): IdeaRecord[] {
     .prepare("SELECT * FROM ideas ORDER BY updated_at DESC")
     .all() as Record<string, unknown>[];
   return rows.map(rowToIdea);
+}
+
+function legacyHonestyToBreakdown(legacy: {
+  evidence: number;
+  specificity: number;
+  assumptions: number;
+  feasibility: number;
+  flags: string[];
+  summary: string;
+}): HonestyBreakdown {
+  return {
+    dimensions: [
+      { id: "evidence", label: "Evidence & sources", score: legacy.evidence, note: "" },
+      { id: "specificity", label: "Specificity", score: legacy.specificity, note: "" },
+      { id: "assumptions", label: "Assumptions stated", score: legacy.assumptions, note: "" },
+      { id: "feasibility", label: "Feasibility realism", score: legacy.feasibility, note: "" },
+    ],
+    flags: legacy.flags,
+    summary: legacy.summary,
+  };
 }
 
 export function getIdea(id: string): IdeaRecord | null {
@@ -300,8 +325,8 @@ export function saveMessage(msg: Omit<ChatMessage, "createdAt"> & { createdAt?: 
   const createdAt = msg.createdAt ?? new Date().toISOString();
   getDb()
     .prepare(
-      `INSERT INTO messages (id, session_id, role, content, agent_id, honesty_score, depth_score, idea_id, related_ideas, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO messages (id, session_id, role, content, agent_id, honesty_score, honesty_breakdown, depth_score, idea_id, related_ideas, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       msg.id,
@@ -309,7 +334,8 @@ export function saveMessage(msg: Omit<ChatMessage, "createdAt"> & { createdAt?: 
       msg.role,
       msg.content,
       msg.agentId ?? null,
-      msg.honestyScore ? JSON.stringify(msg.honestyScore) : null,
+      null,
+      msg.honestyBreakdown ? JSON.stringify(msg.honestyBreakdown) : null,
       msg.depthScore ? JSON.stringify(msg.depthScore) : null,
       msg.ideaId ?? null,
       msg.relatedIdeas ? JSON.stringify(msg.relatedIdeas) : null,
@@ -328,9 +354,11 @@ export function getMessages(sessionId: string): ChatMessage[] {
     role: row.role as ChatMessage["role"],
     content: row.content as string,
     agentId: (row.agent_id as BmadAgentId) ?? undefined,
-    honestyScore: row.honesty_score
-      ? (JSON.parse(row.honesty_score as string) as HonestyScore)
-      : undefined,
+    honestyBreakdown: row.honesty_breakdown
+      ? (JSON.parse(row.honesty_breakdown as string) as HonestyBreakdown)
+      : row.honesty_score
+        ? legacyHonestyToBreakdown(JSON.parse(row.honesty_score as string))
+        : undefined,
     depthScore: row.depth_score
       ? (JSON.parse(row.depth_score as string) as DepthScore)
       : undefined,

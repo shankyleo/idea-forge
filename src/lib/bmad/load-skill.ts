@@ -18,7 +18,6 @@ export function buildSystemPrompt(
   agentId: BmadAgentId,
   context: {
     relatedIdeas: Array<{ title: string; summary: string; reason: string }>;
-    honestyScore?: { overall: number; flags: string[]; summary: string };
     ideaTitle?: string;
     researchBlock?: string;
   }
@@ -33,10 +32,6 @@ export function buildSystemPrompt(
           .join("\n")}\n\nWhen relevant, connect the current discussion to these ideas.`
       : "";
 
-  const honestyBlock = context.honestyScore
-    ? `\n\n## User message honesty analysis (for your awareness)\nOverall score: ${context.honestyScore.overall}/100\nFlags: ${context.honestyScore.flags.join(", ") || "none"}\n${context.honestyScore.summary}\n\nGently surface weak claims. Do not be preachy.`
-    : "";
-
   const ideaBlock = context.ideaTitle
     ? `\n\n## Active idea\nThe user is working on: "${context.ideaTitle}"`
     : "";
@@ -50,13 +45,12 @@ export function buildSystemPrompt(
 Follow the BMAD skill instructions below. Adapt them for chat (not file-based workflows). Keep responses focused and conversational unless the user wants depth.
 
 ## App behavior
-- Score and challenge vague or overconfident claims
 - Link ideas to related ones in the vault when it genuinely helps
 - One question at a time when pressure-testing (forge mode)
-- For Deep Recon: always include a **Depth verdict** section with competition level and go/no-go guidance
-- End each response with a brief "Honesty note" only if you found material gaps
+- For Deep Recon: include a **Depth verdict** section with competition level and go/no-go guidance
+- Honesty scoring is handled by the Honesty Coach agent only — do not invent honesty scores
 
-${ideaBlock}${relatedBlock}${honestyBlock}${researchBlock}
+${ideaBlock}${relatedBlock}${researchBlock}
 
 ---
 

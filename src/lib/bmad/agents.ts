@@ -2,6 +2,15 @@ import type { AgentInfo, BmadAgentId } from "@/lib/types";
 
 export const BMAD_AGENTS: AgentInfo[] = [
   {
+    id: "honesty-coach",
+    name: "Honesty Coach",
+    persona: "Claim grounding analyst",
+    description:
+      "BMAD agent that scores your idea across six dimensions — no overall number, full breakdown.",
+    skillPath: ".agents/skills/bmad-honesty-coach/SKILL.md",
+    color: "#14b8a6",
+  },
+  {
     id: "deep-recon",
     name: "Deep Recon",
     persona: "Research director",

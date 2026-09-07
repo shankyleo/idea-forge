@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Send, Sparkles, AlertCircle } from "lucide-react";
-import type { AgentInfo, BmadAgentId, ChatMessage, DepthScore, HonestyScore } from "@/lib/types";
+import type { AgentInfo, BmadAgentId, ChatMessage, DepthScore, HonestyBreakdown } from "@/lib/types";
 import { AgentPicker } from "@/components/AgentPicker";
-import { HonestyBadge } from "@/components/HonestyBadge";
+import { HonestyBreakdownCard } from "@/components/HonestyBreakdownCard";
 import { DepthBadge } from "@/components/DepthBadge";
 import { RelatedIdeas } from "@/components/IdeaSidebar";
 import { getAgent } from "@/lib/bmad/agents";
@@ -31,7 +31,6 @@ export function ChatWindow({
   const [loading, setLoading] = useState(false);
   const [researching, setResearching] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
-  const [lastHonesty, setLastHonesty] = useState<HonestyScore | null>(null);
   const [lastDepth, setLastDepth] = useState<DepthScore | null>(null);
   const [lastRelated, setLastRelated] = useState<
     Array<{ id: string; title: string; score: number; reason: string }>
@@ -84,7 +83,6 @@ export function ChatWindow({
     setLoading(true);
     setResearching(agentId === "deep-recon" && !isCasualMessage(text));
     setStreamingContent("");
-    setLastHonesty(null);
     setLastDepth(null);
     setLastRelated([]);
 
@@ -139,16 +137,13 @@ export function ChatWindow({
                   m.id === optimisticUser.id
                     ? {
                         ...m,
-                        honestyScore: payload.honestyScore as HonestyScore,
+                        honestyBreakdown: payload.honestyBreakdown as HonestyBreakdown | undefined,
                         depthScore: payload.depthScore as DepthScore | undefined,
                         relatedIdeas: payload.relatedIdeas as ChatMessage["relatedIdeas"],
                         ideaId: payload.ideaId as string | undefined,
                       }
                     : m
                 )
-              );
-              setLastHonesty(
-                payload.honestyScore ? (payload.honestyScore as HonestyScore) : null
               );
               if (payload.depthScore) setLastDepth(payload.depthScore as DepthScore);
               setLastRelated((payload.relatedIdeas as typeof lastRelated) ?? []);
@@ -237,7 +232,7 @@ export function ChatWindow({
               challenge, and connect it to your other ideas.
             </p>
             <p className="mt-2 text-xs text-zinc-600">
-              Say hi to get started. Honesty &amp; depth scores appear when you share a real idea.
+              Say hi to get started. Use Honesty Coach for claim breakdowns; Deep Recon for market depth.
             </p>
           </div>
         )}
@@ -261,9 +256,9 @@ export function ChatWindow({
                   </div>
                 )}
                 <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
-                {msg.role === "user" && msg.honestyScore && (
+                {msg.role === "user" && msg.honestyBreakdown && (
                   <div className="mt-3 space-y-2">
-                    <HonestyBadge score={msg.honestyScore} compact />
+                    <HonestyBreakdownCard breakdown={msg.honestyBreakdown} compact />
                     {msg.depthScore && <DepthBadge score={msg.depthScore} compact />}
                   </div>
                 )}
@@ -295,17 +290,10 @@ export function ChatWindow({
             </div>
           )}
 
-          {lastHonesty && loading && !researching && (
+          {lastDepth && loading && !researching && (
             <div className="mx-auto max-w-md space-y-2">
-              <HonestyBadge score={lastHonesty} />
-              {lastDepth && <DepthBadge score={lastDepth} />}
+              <DepthBadge score={lastDepth} />
               {lastRelated.length > 0 && <RelatedIdeas related={lastRelated} />}
-            </div>
-          )}
-
-          {lastHonesty && loading && researching && (
-            <div className="mx-auto max-w-md">
-              <HonestyBadge score={lastHonesty} />
             </div>
           )}
 

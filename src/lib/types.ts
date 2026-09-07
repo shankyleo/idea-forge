@@ -1,7 +1,8 @@
 export type BmadAgentId =
+  | "honesty-coach"
+  | "deep-recon"
   | "forge"
   | "brainstorm"
-  | "deep-recon"
   | "red-team"
   | "design-thinking"
   | "innovation"
@@ -15,6 +16,20 @@ export interface DepthScore {
   signals: string[];
 }
 
+export interface HonestyDimension {
+  id: string;
+  label: string;
+  score: number;
+  note: string;
+}
+
+export interface HonestyBreakdown {
+  dimensions: HonestyDimension[];
+  flags: string[];
+  summary: string;
+}
+
+/** @deprecated Use HonestyBreakdown — no overall score */
 export interface HonestyScore {
   overall: number;
   evidence: number;
@@ -48,6 +63,8 @@ export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
   agentId?: BmadAgentId;
+  honestyBreakdown?: HonestyBreakdown;
+  /** @deprecated */
   honestyScore?: HonestyScore;
   ideaId?: string;
   relatedIdeas?: Array<{ id: string; title: string; score: number; reason: string }>;

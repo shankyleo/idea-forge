@@ -18,6 +18,12 @@ export function shouldRunWebResearch(agentId: BmadAgentId, message: string): boo
 }
 
 export function casualReply(agentId: BmadAgentId): string {
+  if (agentId === "honesty-coach") {
+    return `Hey! I'm the **Honesty Coach**. Share an app or business idea and I'll break down how grounded your claims are — six dimensions, no single overall score.
+
+Example: "I want to build a SaaS for freelancers. There's no competition and it'll be easy."`;
+  }
+
   if (agentId === "deep-recon") {
     return `Hey! I'm **Deep Recon** — I search the web and score whether your idea has real market depth.
 
@@ -25,8 +31,8 @@ Share something specific, for example:
 - "SaaS for freelancers to track invoices"
 - "AI app that helps restaurants manage inventory"
 
-When you share a real idea, I'll run live market research and show honesty + depth scores.`;
+When you share a real idea, I'll run live market research and show a depth score.`;
   }
 
-  return `Hey! I'm ready when you are. Describe an app idea, business concept, or problem you want to think through — I'll score your claims when you share something substantive.`;
+  return `Hey! I'm ready when you are. Describe an app idea, business concept, or problem you want to think through — switch to **Honesty Coach** when you want a claim breakdown.`;
 }

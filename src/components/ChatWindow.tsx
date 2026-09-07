@@ -7,6 +7,12 @@ import { HonestyBreakdownCard } from "@/components/HonestyBreakdownCard";
 import { DepthBadge } from "@/components/DepthBadge";
 import { RelatedIdeas } from "@/components/IdeaSidebar";
 import { getAgent } from "@/lib/bmad/agents";
+import {
+  MarkdownContent,
+  PerspectiveCards,
+  ForgeActionBar,
+} from "@/components/AssistantMessage";
+import type { AgentPerspective } from "@/lib/types";
 
 const CHAT_TIMEOUT_MS = 90_000;
 
@@ -39,6 +45,8 @@ export function ChatWindow({
   } | null>(null);
   const [streamingContent, setStreamingContent] = useState("");
   const [streamingAgentId, setStreamingAgentId] = useState<BmadAgentId | null>(null);
+  const [streamingPerspectives, setStreamingPerspectives] = useState<AgentPerspective[]>([]);
+  const [streamingForgeActions, setStreamingForgeActions] = useState(false);
   const [lastDepth, setLastDepth] = useState<DepthScore | null>(null);
   const [lastRelated, setLastRelated] = useState<
     Array<{ id: string; title: string; score: number; reason: string }>
@@ -91,16 +99,18 @@ export function ChatWindow({
     }
   };
 
-  const sendMessage = async () => {
-    const text = input.trim();
+  const sendMessage = async (overrideText?: string) => {
+    const text = (overrideText ?? input).trim();
     if (!text || loading) return;
 
-    setInput("");
+    if (!overrideText) setInput("");
     setLoading(true);
     setStatusLine("Choosing the best agent for your message...");
     setActiveRoute(null);
     setStreamingContent("");
     setStreamingAgentId(null);
+    setStreamingPerspectives([]);
+    setStreamingForgeActions(false);
     setLastDepth(null);
     setLastRelated([]);
 
@@ -118,6 +128,8 @@ export function ChatWindow({
 
     let routedAgent: BmadAgentId | null = null;
     let routeReason = "";
+    let responsePerspectives: AgentPerspective[] = [];
+    let responseForgeActions = false;
 
     try {
       const res = await fetch("/api/chat", {
@@ -184,6 +196,14 @@ export function ChatWindow({
               );
               if (payload.depthScore) setLastDepth(payload.depthScore as DepthScore);
               setLastRelated((payload.relatedIdeas as typeof lastRelated) ?? []);
+              if (payload.perspectives) {
+                responsePerspectives = payload.perspectives as AgentPerspective[];
+                setStreamingPerspectives(responsePerspectives);
+              }
+              if (payload.showForgeActions) {
+                responseForgeActions = true;
+                setStreamingForgeActions(true);
+              }
               metaApplied = true;
             }
           } else if (payload.type === "chunk") {
@@ -200,11 +220,15 @@ export function ChatWindow({
                 content: assistantContent.trim(),
                 agentId: routedAgent ?? undefined,
                 routeReason: routeReason || undefined,
+                perspectives: responsePerspectives,
+                showForgeActions: responseForgeActions,
                 createdAt: new Date().toISOString(),
               },
             ]);
             setStreamingContent("");
             setStreamingAgentId(null);
+            setStreamingPerspectives([]);
+            setStreamingForgeActions(false);
             onIdeasUpdated();
             onSessionActivity?.();
             void loadMessages();
@@ -338,7 +362,20 @@ export function ChatWindow({
                         )}
                       </div>
                     )}
-                    <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
+                    {msg.role === "assistant" ? (
+                      <MarkdownContent content={msg.content} />
+                    ) : (
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
+                    )}
+                    {msg.role === "assistant" && msg.perspectives && msg.perspectives.length > 0 && (
+                      <PerspectiveCards perspectives={msg.perspectives} />
+                    )}
+                    {msg.role === "assistant" && msg.showForgeActions && (
+                      <ForgeActionBar
+                        disabled={loading}
+                        onAction={(t) => void sendMessage(t)}
+                      />
+                    )}
                     {msg.role === "user" && msg.honestyBreakdown && (
                       <div className="mt-3 space-y-2">
                         <HonestyBreakdownCard breakdown={msg.honestyBreakdown} compact />
@@ -367,7 +404,13 @@ export function ChatWindow({
                 <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
                   {getAgent(streamingAgentId).name}
                 </div>
-                <p className="whitespace-pre-wrap text-sm leading-relaxed">{streamingContent}</p>
+                <MarkdownContent content={streamingContent} />
+                {streamingPerspectives.length > 0 && (
+                  <PerspectiveCards perspectives={streamingPerspectives} />
+                )}
+                {streamingForgeActions && (
+                  <ForgeActionBar disabled={loading} onAction={(t) => void sendMessage(t)} />
+                )}
               </div>
             </div>
           )}
@@ -411,7 +454,7 @@ export function ChatWindow({
           />
           <button
             type="button"
-            onClick={sendMessage}
+            onClick={() => void sendMessage()}
             disabled={loading || !input.trim()}
             className="flex h-auto items-center justify-center rounded-xl bg-indigo-600 px-4 text-white transition-colors hover:bg-indigo-500 disabled:opacity-40"
           >

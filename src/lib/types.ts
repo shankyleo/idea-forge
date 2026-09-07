@@ -57,6 +57,14 @@ export interface IdeaLink {
   reason: string;
 }
 
+export interface AgentPerspective {
+  agentId: BmadAgentId;
+  name: string;
+  role: string;
+  content: string;
+  color: string;
+}
+
 export interface ChatMessage {
   id: string;
   sessionId: string;
@@ -71,6 +79,8 @@ export interface ChatMessage {
   ideaId?: string;
   relatedIdeas?: Array<{ id: string; title: string; score: number; reason: string }>;
   depthScore?: DepthScore;
+  perspectives?: AgentPerspective[];
+  showForgeActions?: boolean;
   sessionTitle?: string;
   createdAt: string;
 }

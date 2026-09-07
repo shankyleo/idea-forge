@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { getAgent } from "@/lib/bmad/agents";
+import { RESPONSE_FORMAT_INSTRUCTION } from "@/lib/panel-perspectives";
 import type { BmadAgentId } from "@/lib/types";
 
 const PROJECT_ROOT = process.cwd();
@@ -50,7 +51,7 @@ Follow the BMAD skill instructions below. Adapt them for chat (not file-based wo
 - For Deep Recon: include a **Depth verdict** section with competition level and go/no-go guidance
 - Honesty scoring is handled by the Honesty Coach agent only — do not invent honesty scores
 
-${ideaBlock}${relatedBlock}${researchBlock}
+${ideaBlock}${relatedBlock}${researchBlock}${RESPONSE_FORMAT_INSTRUCTION}
 
 ---
 

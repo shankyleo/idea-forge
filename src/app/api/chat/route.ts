@@ -13,7 +13,9 @@ import { runDeepRecon } from "@/lib/web-research";
 import { shouldRunWebResearch, isCasualMessage } from "@/lib/message-utils";
 import { runHonestyBreakdown } from "@/lib/honesty-agent";
 import { routeMessage } from "@/lib/agent-router";
-import type { DepthScore, HonestyBreakdown } from "@/lib/types";
+import { generatePerspectives } from "@/lib/panel-perspectives";
+import type { DepthScore, HonestyBreakdown, AgentPerspective } from "@/lib/types";
+import type { DeepReconResult } from "@/lib/web-research";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -43,6 +45,18 @@ export async function POST(request: Request) {
 
   const historyMessages = getMessages(sessionId).filter((m) => m.role !== "system");
   const lastAssistant = [...historyMessages].reverse().find((m) => m.role === "assistant");
+
+  const forgeMode = /^attack this[.!]?$/i.test(message.trim())
+    ? ("attack" as const)
+    : /^defend this[.!]?$/i.test(message.trim())
+      ? ("defend" as const)
+      : undefined;
+
+  const topicMessage =
+    forgeMode &&
+    [...historyMessages].reverse().find(
+      (m) => m.role === "user" && !/^(attack|defend) this/i.test(m.content.trim())
+    )?.content;
 
   const route = routeMessage(message, {
     lastAgentId: lastAssistant?.agentId,
@@ -106,20 +120,31 @@ export async function POST(request: Request) {
 
       let researchBlock: string | undefined;
       let depthScore: DepthScore | undefined;
+      let reconResult: DeepReconResult | undefined;
       let honestyBreakdown: HonestyBreakdown | undefined;
       let honestyNarrative: string | undefined;
+      let perspectives: AgentPerspective[] = [];
 
       try {
         if (shouldRunWebResearch(agentId, message)) {
           send({ type: "status", message: "Deep Recon searching the market..." });
-          const recon = await runDeepRecon(message);
-          researchBlock = recon.researchBlock;
+          reconResult = await runDeepRecon(message);
+          researchBlock = reconResult.researchBlock;
           depthScore = {
-            overall: recon.depth.depthScore,
-            competitionLevel: recon.depth.competitionLevel,
-            verdict: recon.depth.verdict,
-            signals: recon.depth.signals,
+            overall: reconResult.depth.depthScore,
+            competitionLevel: reconResult.depth.competitionLevel,
+            verdict: reconResult.depth.verdict,
+            signals: reconResult.depth.signals,
           };
+        }
+
+        if (!casual && agentId !== "honesty-coach") {
+          perspectives = generatePerspectives({
+            message: topicMessage ?? message,
+            depthScore,
+            recon: reconResult,
+            primaryAgentId: agentId,
+          });
         }
 
         if (agentId === "honesty-coach" && !casual) {
@@ -158,6 +183,8 @@ export async function POST(request: Request) {
           agentId,
           routeReason: route.reason,
           matchedAgents: route.matchedAgents,
+          perspectives,
+          showForgeActions: !casual && agentId !== "honesty-coach",
           userMessageId: userMsgId,
           assistantMessageId: assistantMsgId,
         });
@@ -177,6 +204,9 @@ export async function POST(request: Request) {
             ideaTitle: extractedIdea?.title ?? ideaTitle,
             researchBlock,
             depthScore,
+            recon: reconResult,
+            forgeMode,
+            topicMessage: topicMessage ?? message,
           })) {
             fullResponse += chunk;
             send({ type: "chunk", content: chunk });
@@ -192,9 +222,11 @@ export async function POST(request: Request) {
           ideaId,
           routeReason: route.reason,
           matchedAgents: route.matchedAgents,
+          perspectives,
+          showForgeActions: !casual && agentId !== "honesty-coach",
         });
 
-        send({ type: "done" });
+        send({ type: "done", perspectives, showForgeActions: !casual && agentId !== "honesty-coach" });
       } catch (error) {
         send({
           type: "error",

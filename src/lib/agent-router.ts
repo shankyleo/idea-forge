@@ -145,6 +145,21 @@ export function routeMessage(
     };
   }
 
+  if (/^attack this[.!]?$/i.test(trimmed)) {
+    return {
+      agentId: "forge",
+      reason: "Forge attack mode — challenging your idea",
+      matchedAgents: [{ id: "forge", label: "attack mode" }],
+    };
+  }
+  if (/^defend this[.!]?$/i.test(trimmed)) {
+    return {
+      agentId: "forge",
+      reason: "Forge defend mode — steel-manning your idea",
+      matchedAgents: [{ id: "forge", label: "defend mode" }],
+    };
+  }
+
   const followUp = followUpAgent(trimmed, options?.lastAgentId);
   if (followUp) {
     return {

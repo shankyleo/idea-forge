@@ -94,6 +94,16 @@ function initSchema(database: Database.Database) {
   } catch {
     // column already exists
   }
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN perspectives TEXT`);
+  } catch {
+    // column already exists
+  }
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN show_forge_actions INTEGER DEFAULT 0`);
+  } catch {
+    // column already exists
+  }
 }
 
 function rowToIdea(row: Record<string, unknown>): IdeaRecord {
@@ -375,6 +385,10 @@ function mapMessageRow(row: Record<string, unknown>): ChatMessage {
     matchedAgents: row.matched_agents
       ? (JSON.parse(row.matched_agents as string) as ChatMessage["matchedAgents"])
       : undefined,
+    perspectives: row.perspectives
+      ? (JSON.parse(row.perspectives as string) as ChatMessage["perspectives"])
+      : undefined,
+    showForgeActions: Boolean(row.show_forge_actions),
     sessionTitle: (row.session_title as string) ?? undefined,
     createdAt: row.created_at as string,
   };
@@ -493,8 +507,8 @@ export function saveMessage(msg: Omit<ChatMessage, "createdAt"> & { createdAt?: 
   const createdAt = msg.createdAt ?? new Date().toISOString();
   getDb()
     .prepare(
-      `INSERT INTO messages (id, session_id, role, content, agent_id, honesty_score, honesty_breakdown, depth_score, idea_id, related_ideas, route_reason, matched_agents, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO messages (id, session_id, role, content, agent_id, honesty_score, honesty_breakdown, depth_score, idea_id, related_ideas, route_reason, matched_agents, perspectives, show_forge_actions, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       msg.id,
@@ -509,6 +523,8 @@ export function saveMessage(msg: Omit<ChatMessage, "createdAt"> & { createdAt?: 
       msg.relatedIdeas ? JSON.stringify(msg.relatedIdeas) : null,
       msg.routeReason ?? null,
       msg.matchedAgents ? JSON.stringify(msg.matchedAgents) : null,
+      msg.perspectives ? JSON.stringify(msg.perspectives) : null,
+      msg.showForgeActions ? 1 : 0,
       createdAt
     );
   updateSession(msg.sessionId, {});

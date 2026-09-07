@@ -1,4 +1,10 @@
-import type { IdeaLink, IdeaRecord, IdeaGroup } from "@/lib/types";
+import type {
+  IdeaLink,
+  IdeaRecord,
+  IdeaGroup,
+  IdeaGraph,
+  IdeaGraphEdge,
+} from "@/lib/types";
 
 export type { IdeaGroup };
 
@@ -68,4 +74,49 @@ export function buildIdeaGroups(
 function intersectTags(ideas: IdeaRecord[]): string[] {
   if (ideas.length === 0) return [];
   return ideas[0].tags.filter((tag) => ideas.every((i) => i.tags.includes(tag)));
+}
+
+/**
+ * Build a node/edge graph for the visual Idea map. Nodes carry the cluster
+ * (group) they belong to so the UI can color related ideas together; edges are
+ * the idea links, collapsed to a single undirected edge per pair keeping the
+ * strongest score and its reason.
+ */
+export function buildIdeaGraph(ideas: IdeaRecord[], links: IdeaLink[]): IdeaGraph {
+  const groups = buildIdeaGroups(ideas, links);
+  const groupOf = new Map<string, { id: string; index: number; label: string }>();
+  groups.forEach((group, index) => {
+    for (const idea of group.ideas) {
+      groupOf.set(idea.id, { id: group.id, index, label: group.label });
+    }
+  });
+
+  const nodes = ideas.map((idea) => {
+    const g = groupOf.get(idea.id);
+    return {
+      id: idea.id,
+      title: idea.title,
+      summary: idea.summary,
+      tags: idea.tags,
+      status: idea.status,
+      groupId: g?.id ?? idea.id,
+      groupIndex: g?.index ?? 0,
+      groupLabel: g?.label ?? idea.title,
+    };
+  });
+
+  const ideaIds = new Set(ideas.map((i) => i.id));
+  const edgeByPair = new Map<string, IdeaGraphEdge>();
+  for (const link of links) {
+    if (!ideaIds.has(link.ideaId) || !ideaIds.has(link.relatedId)) continue;
+    if (link.ideaId === link.relatedId) continue;
+    const [a, b] = [link.ideaId, link.relatedId].sort();
+    const key = `${a}:${b}`;
+    const existing = edgeByPair.get(key);
+    if (!existing || link.score > existing.score) {
+      edgeByPair.set(key, { source: a, target: b, score: link.score, reason: link.reason });
+    }
+  }
+
+  return { nodes, edges: [...edgeByPair.values()] };
 }

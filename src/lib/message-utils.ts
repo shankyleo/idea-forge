@@ -6,8 +6,13 @@ const GREETING_PATTERN =
 const IDEA_HINT_PATTERN =
   /\b(app|saas|startup|product|idea|build|create|market|business|platform|tool|service|freelancer|mobile|ai)\b/i;
 
+// Forge/red-team action commands are never casual — they act on the previous idea.
+const ACTION_COMMAND_PATTERN =
+  /^(attack this|defend this|what'?s missing)([\s.!?].*)?$/i;
+
 export function isCasualMessage(text: string): boolean {
   const trimmed = text.trim();
+  if (ACTION_COMMAND_PATTERN.test(trimmed)) return false;
   if (trimmed.length < 20 && !IDEA_HINT_PATTERN.test(trimmed)) return true;
   if (GREETING_PATTERN.test(trimmed)) return true;
   return false;

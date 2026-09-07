@@ -97,6 +97,15 @@ function extractTextFromEvent(event: unknown): string | null {
   if (!event || typeof event !== "object") return null;
   const e = event as Record<string, unknown>;
 
+  if (e.type === "assistant" && e.message && typeof e.message === "object") {
+    const message = e.message as { content?: Array<{ type?: string; text?: string }> };
+    const text = message.content
+      ?.filter((block) => block.type === "text" && typeof block.text === "string")
+      .map((block) => block.text)
+      .join("");
+    if (text) return text;
+  }
+
   if (e.type === "assistant" && typeof e.text === "string") return e.text;
   if (e.type === "text-delta" && typeof e.delta === "string") return e.delta;
   if (e.type === "content_block_delta") {

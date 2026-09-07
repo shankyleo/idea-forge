@@ -64,6 +64,8 @@ export interface IdeaRecord {
   summary: string;
   tags: string[];
   status: "draft" | "forging" | "validated" | "archived";
+  pinned?: boolean;
+  pinnedAt?: string;
   createdAt: string;
   updatedAt: string;
 }

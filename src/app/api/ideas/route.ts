@@ -9,6 +9,7 @@ import {
   listAllIdeaThoughts,
   getThoughtsForIdea,
   consolidateDuplicateSessionIdeas,
+  updateIdeaPin,
 } from "@/lib/db";
 import { buildIdeaGroups, buildIdeaGraph } from "@/lib/idea-groups";
 
@@ -47,4 +48,21 @@ export async function GET(request: Request) {
   }
 
   return NextResponse.json({ ideas });
+}
+
+export async function PATCH(request: Request) {
+  const body = (await request.json()) as { id: string; pinned?: boolean };
+
+  if (!body.id) {
+    return NextResponse.json({ error: "id required" }, { status: 400 });
+  }
+
+  if (body.pinned === undefined) {
+    return NextResponse.json({ error: "pinned required" }, { status: 400 });
+  }
+
+  const idea = updateIdeaPin(body.id, body.pinned);
+  if (!idea) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  return NextResponse.json({ idea });
 }

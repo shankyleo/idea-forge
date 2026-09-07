@@ -232,9 +232,9 @@ export default function HomePage() {
     [loadSidebar]
   );
 
-  const handleTogglePinSession = useCallback(
+  const handleTogglePinIdea = useCallback(
     async (id: string, pinned: boolean) => {
-      await fetchWithTimeout("/api/sessions", {
+      await fetchWithTimeout("/api/ideas", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, pinned }),
@@ -286,7 +286,7 @@ export default function HomePage() {
           onNewSession={handleNewSession}
           onClearIdea={handleClearIdea}
           onRenameSession={handleRenameSession}
-          onTogglePinSession={handleTogglePinSession}
+          onTogglePinIdea={handleTogglePinIdea}
         />
       </div>
       <div className="min-w-0 flex-1">

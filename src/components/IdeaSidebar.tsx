@@ -42,7 +42,7 @@ interface IdeaSidebarProps {
   onNewSession: () => void;
   onClearIdea: () => void;
   onRenameSession?: (sessionId: string, title: string) => void | Promise<void>;
-  onTogglePinSession?: (sessionId: string, pinned: boolean) => void | Promise<void>;
+  onTogglePinIdea?: (ideaId: string, pinned: boolean) => void | Promise<void>;
 }
 
 function formatWhen(iso: string) {
@@ -70,11 +70,67 @@ export function IdeaSidebar({
   onNewSession,
   onClearIdea,
   onRenameSession,
-  onTogglePinSession,
+  onTogglePinIdea,
 }: IdeaSidebarProps) {
   const totalIdeas = groups.reduce((n, g) => n + g.ideas.length, 0);
-  const pinnedSessions = sessions.filter((s) => s.pinned);
-  const unpinnedSessions = sessions.filter((s) => !s.pinned);
+  const allIdeas = groups.flatMap((g) => g.ideas);
+  const pinnedIdeas = allIdeas.filter((i) => i.pinned);
+  const unpinnedIdeas = allIdeas.filter((i) => !i.pinned);
+
+  const renderIdea = (idea: IdeaRecord) => (
+    <li key={idea.id}>
+      <div
+        className={cn(
+          "flex items-start gap-2 rounded-md px-2 py-2 transition-colors",
+          activeIdeaId === idea.id ? "bg-indigo-600/15 ring-1 ring-indigo-500/30" : "hover:bg-zinc-800/60"
+        )}
+      >
+        <button
+          type="button"
+          onClick={() => onSelectIdea(idea.id)}
+          className="min-w-0 flex-1 text-left text-sm text-zinc-300"
+        >
+          <div className="flex items-center gap-1.5">
+            <Lightbulb className="h-3 w-3 shrink-0 text-amber-400/80" />
+            <span className="font-medium line-clamp-2">
+              {normalizeConversationTitle(idea.title)}
+            </span>
+          </div>
+          {idea.tags.length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-1 pl-4">
+              {idea.tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] uppercase text-zinc-500"
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+          )}
+        </button>
+        {onTogglePinIdea && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              void onTogglePinIdea(idea.id, !idea.pinned);
+            }}
+            className={cn(
+              "mt-0.5 shrink-0 rounded p-1 transition-colors",
+              idea.pinned
+                ? "text-amber-400 hover:bg-amber-500/10"
+                : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300"
+            )}
+            title={idea.pinned ? "Unpin conversation" : "Pin conversation"}
+            aria-label={idea.pinned ? "Unpin conversation" : "Pin conversation"}
+          >
+            <Pin className={cn("h-3.5 w-3.5", idea.pinned && "fill-current")} />
+          </button>
+        )}
+      </div>
+    </li>
+  );
 
   const renderSession = (session: ChatSession) => {
     const label = session.displayTitle ?? session.title;
@@ -118,25 +174,6 @@ export function IdeaSidebar({
                 {session.messageCount ?? 0} messages
               </p>
             </div>
-            {onTogglePinSession && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void onTogglePinSession(session.id, !session.pinned);
-                }}
-                className={cn(
-                  "mt-0.5 shrink-0 rounded p-1 transition-colors",
-                  session.pinned
-                    ? "text-amber-400 hover:bg-amber-500/10"
-                    : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300"
-                )}
-                title={session.pinned ? "Unpin conversation" : "Pin conversation"}
-                aria-label={session.pinned ? "Unpin conversation" : "Pin conversation"}
-              >
-                <Pin className={cn("h-3.5 w-3.5", session.pinned && "fill-current")} />
-              </button>
-            )}
           </div>
         </div>
       </li>
@@ -184,51 +221,35 @@ export function IdeaSidebar({
           </div>
           <div className="border-b border-zinc-800 px-4 py-2">
             <p className="text-xs text-zinc-500">
-              {totalIdeas} idea{totalIdeas === 1 ? "" : "s"} from your chats
+              {totalIdeas} conversation{totalIdeas === 1 ? "" : "s"}
             </p>
             <p className="mt-0.5 text-[10px] text-zinc-600">
-              One idea per conversation — follow-ups stay in the same thread
+              Pin conversations you want quick access to
             </p>
           </div>
 
           <div className="flex-1 overflow-y-auto p-2">
-            {groups.length === 0 ? (
+            {allIdeas.length === 0 ? (
               <p className="px-2 py-4 text-xs text-zinc-500">
-                Ideas appear as you chat. Describe products, angles, or concepts — the team will
-                weigh in.
+                Conversations appear as you chat. Describe products, angles, or concepts — the team
+                will weigh in.
               </p>
             ) : (
               <ul className="space-y-1">
-                {groups.flatMap((g) => g.ideas).map((idea) => (
-                  <li key={idea.id}>
-                    <button
-                      type="button"
-                      onClick={() => onSelectIdea(idea.id)}
-                      className={cn(
-                        "w-full rounded-md px-3 py-2 text-left text-sm transition-colors text-zinc-300 hover:bg-zinc-800/60"
-                      )}
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <Lightbulb className="h-3 w-3 shrink-0 text-amber-400/80" />
-                        <span className="font-medium line-clamp-2">
-                          {normalizeConversationTitle(idea.title)}
-                        </span>
-                      </div>
-                      {idea.tags.length > 0 && (
-                        <div className="mt-1 flex flex-wrap gap-1 pl-4">
-                          {idea.tags.map((tag) => (
-                            <span
-                              key={tag}
-                              className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] uppercase text-zinc-500"
-                            >
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </button>
-                  </li>
-                ))}
+                {pinnedIdeas.length > 0 && (
+                  <>
+                    <li className="px-3 pt-1 text-[10px] font-medium uppercase tracking-wide text-amber-500/80">
+                      Pinned
+                    </li>
+                    {pinnedIdeas.map(renderIdea)}
+                    {unpinnedIdeas.length > 0 && (
+                      <li className="px-3 pt-3 text-[10px] font-medium uppercase tracking-wide text-zinc-600">
+                        All conversations
+                      </li>
+                    )}
+                  </>
+                )}
+                {unpinnedIdeas.map(renderIdea)}
               </ul>
             )}
           </div>
@@ -278,22 +299,7 @@ export function IdeaSidebar({
             {sessions.length === 0 ? (
               <p className="px-2 py-4 text-xs text-zinc-500">No past conversations yet.</p>
             ) : (
-              <ul className="space-y-1">
-                {pinnedSessions.length > 0 && (
-                  <>
-                    <li className="px-3 pt-1 text-[10px] font-medium uppercase tracking-wide text-amber-500/80">
-                      Pinned
-                    </li>
-                    {pinnedSessions.map(renderSession)}
-                    {unpinnedSessions.length > 0 && (
-                      <li className="px-3 pt-3 text-[10px] font-medium uppercase tracking-wide text-zinc-600">
-                        Recent
-                      </li>
-                    )}
-                  </>
-                )}
-                {unpinnedSessions.map(renderSession)}
-              </ul>
+              <ul className="space-y-1">{sessions.map(renderSession)}</ul>
             )}
           </div>
         </>

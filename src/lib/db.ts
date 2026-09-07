@@ -125,6 +125,16 @@ function initSchema(database: Database.Database) {
   } catch {
     // column already exists
   }
+  try {
+    database.exec(`ALTER TABLE ideas ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    // column already exists
+  }
+  try {
+    database.exec(`ALTER TABLE ideas ADD COLUMN pinned_at TEXT`);
+  } catch {
+    // column already exists
+  }
 }
 
 function rowToIdea(row: Record<string, unknown>): IdeaRecord {
@@ -134,6 +144,8 @@ function rowToIdea(row: Record<string, unknown>): IdeaRecord {
     summary: row.summary as string,
     tags: JSON.parse((row.tags as string) || "[]"),
     status: row.status as IdeaRecord["status"],
+    pinned: Boolean(row.pinned),
+    pinnedAt: (row.pinned_at as string) ?? undefined,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -141,9 +153,22 @@ function rowToIdea(row: Record<string, unknown>): IdeaRecord {
 
 export function listIdeas(): IdeaRecord[] {
   const rows = getDb()
-    .prepare("SELECT * FROM ideas ORDER BY updated_at DESC")
+    .prepare(
+      `SELECT * FROM ideas
+       ORDER BY pinned DESC, COALESCE(pinned_at, updated_at) DESC, updated_at DESC`
+    )
     .all() as Record<string, unknown>[];
   return rows.map(rowToIdea);
+}
+
+export function updateIdeaPin(id: string, pinned: boolean): IdeaRecord | null {
+  const idea = getIdea(id);
+  if (!idea) return null;
+  const now = new Date().toISOString();
+  getDb()
+    .prepare(`UPDATE ideas SET pinned = ?, pinned_at = ?, updated_at = ? WHERE id = ?`)
+    .run(pinned ? 1 : 0, pinned ? now : null, now, id);
+  return getIdea(id);
 }
 
 function legacyHonestyToBreakdown(legacy: {

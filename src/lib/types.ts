@@ -82,6 +82,7 @@ export interface ChatMessage {
   perspectives?: AgentPerspective[];
   showForgeActions?: boolean;
   sessionTitle?: string;
+  ideaTitle?: string;
   createdAt: string;
 }
 
@@ -101,6 +102,31 @@ export interface IdeaGroup {
   label: string;
   ideas: IdeaRecord[];
   connectionReason?: string;
+}
+
+export interface IdeaGraphNode {
+  id: string;
+  title: string;
+  summary: string;
+  tags: string[];
+  status: IdeaRecord["status"];
+  /** Cluster id this node belongs to (root idea id of its group). */
+  groupId: string;
+  /** Stable index of the cluster, used to pick a color. */
+  groupIndex: number;
+  groupLabel: string;
+}
+
+export interface IdeaGraphEdge {
+  source: string;
+  target: string;
+  score: number;
+  reason: string;
+}
+
+export interface IdeaGraph {
+  nodes: IdeaGraphNode[];
+  edges: IdeaGraphEdge[];
 }
 
 export interface IdeaThreadMessage extends ChatMessage {

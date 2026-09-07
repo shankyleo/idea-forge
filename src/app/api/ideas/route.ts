@@ -5,21 +5,29 @@ import {
   getIdeaLinks,
   getAllIdeaLinks,
   getRelatedIdeasForIdea,
-  getMessagesForIdea,
+  getMessagesForIdeaGroup,
 } from "@/lib/db";
-import { buildIdeaGroups } from "@/lib/idea-groups";
+import { buildIdeaGroups, buildIdeaGraph } from "@/lib/idea-groups";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
   const grouped = searchParams.get("grouped") === "1";
+  const graph = searchParams.get("graph") === "1";
+
+  if (graph) {
+    const ideas = listIdeas();
+    const links = getAllIdeaLinks();
+    const { nodes, edges } = buildIdeaGraph(ideas, links);
+    return NextResponse.json({ nodes, edges });
+  }
 
   if (id) {
     const idea = getIdea(id);
     if (!idea) return NextResponse.json({ error: "Not found" }, { status: 404 });
     const links = getIdeaLinks(id);
     const related = getRelatedIdeasForIdea(id);
-    const thread = getMessagesForIdea(id);
+    const thread = getMessagesForIdeaGroup(id);
     return NextResponse.json({ idea, links, related, thread });
   }
 

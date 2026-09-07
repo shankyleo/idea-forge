@@ -1,43 +1,82 @@
-import type { BmadAgentId, DepthScore, AgentPerspective } from "@/lib/types";
+import type { BmadAgentId, DepthScore, AgentPerspective, HonestyBreakdown } from "@/lib/types";
 import { getAgent } from "@/lib/bmad/agents";
 import type { DeepReconResult } from "@/lib/web-research";
 
 export type { AgentPerspective };
+
+function toTopic(message: string): string {
+  let t = message.trim().replace(/\s+/g, " ");
+  t = t.replace(/^(i\s+(?:really\s+)?(?:want|would like|wanna|plan|hope|need|aim)\s+to\s+)/i, "");
+  t = t.replace(/^(i'?m\s+(?:thinking about|considering|exploring|building)\s+)/i, "");
+  t = t.replace(/^(what if\s+(?:i|we)\s+(?:could\s+)?)/i, "");
+  t = t.replace(/^(let'?s\s+)/i, "");
+  t = t.replace(/^(my\s+)?idea\s+is\s+(?:to\s+|for\s+)?/i, "");
+  t = t.replace(/^(build|create|make|design|develop|launch|start)\s+/i, "");
+  t = t.replace(/^(an?|the|my)\s+/i, "");
+  t = t.trim().replace(/[.!?]+$/, "");
+  if (!t) t = message.trim();
+  if (t.length > 90) t = t.slice(0, 90).replace(/\s+\S*$/, "") + "…";
+  return t;
+}
 
 export function generatePerspectives(input: {
   message: string;
   depthScore?: DepthScore;
   recon?: Pick<DeepReconResult, "findings" | "depth">;
   primaryAgentId?: BmadAgentId;
+  honesty?: HonestyBreakdown;
 }): AgentPerspective[] {
-  const { message, depthScore, recon } = input;
+  const { message, depthScore, recon, honesty } = input;
   const competition = depthScore?.competitionLevel ?? recon?.depth.competitionLevel ?? "unknown";
   const score = depthScore?.overall ?? recon?.depth.depthScore ?? 50;
   const topCompetitors = (recon?.findings ?? []).slice(0, 3).map((f) => f.title);
+
+  const topic = toTopic(message);
+  const rival = topCompetitors[0] ?? "the incumbents";
+  const second = topCompetitors[1];
+
+  // Use the honesty breakdown to make each take specific to *this* input.
+  const dims = honesty?.dimensions ?? [];
+  const weakest = [...dims].sort((a, b) => a.score - b.score)[0];
+  const topFlag = honesty?.flags?.[0];
 
   const forge = getAgent("forge");
   const reviewer = getAgent("red-team");
   const victor = getAgent("innovation");
   const maya = getAgent("design-thinking");
 
-  const forgeContent =
+  const forgeContent = [
     score < 45
-      ? `This idea reads crowded or vague. Before building, name **one freelancer** who paid for invoice tools last month — not hypothetically. What's the wedge vs ${topCompetitors[0] ?? "incumbents"}?`
+      ? `**"${topic}"** looks crowded or still fuzzy (${score}/100 depth).`
       : competition === "high"
-        ? `Market signal is real but crowded (${score}/100 depth). Your risk isn't "no market" — it's **me-too positioning**. What do you know that ${topCompetitors[0] ?? "existing players"} got wrong for a specific niche?`
-        : `Promising space, but I'm not letting "${message.slice(0, 60)}..." slide without a kill test: **what would make you abandon this in 30 days?**`;
+        ? `**"${topic}"** has real signal but a crowded field (${score}/100). Your risk isn't "no market" — it's **me-too positioning**.`
+        : `**"${topic}"** has room to run (${score}/100) — so I want a kill test before you commit.`,
+    topFlag
+      ? `The claim I'd attack first: *${topFlag}*`
+      : `Name **one real person** who tried to solve this in the last 30 days — not a hypothetical.`,
+    `**What single piece of evidence would make you abandon this in 30 days?**`,
+  ].join(" ");
 
-  const reviewerContent =
+  const reviewerContent = [
+    weakest
+      ? `Your weakest link is **${weakest.label.toLowerCase()}** (${weakest.score}/100): ${weakest.note}`
+      : `Biggest gap is a thin evidence base — few concrete signals.`,
     topCompetitors.length > 0
-      ? `Missing from your pitch: (1) why switch now, (2) pricing vs ${topCompetitors.slice(0, 2).join(" / ") || "alternatives"}, (3) one customer interview quote or data point. Pick one gap and close it this week.`
-      : `Thin evidence base — few competitors surfaced, which could mean whitespace **or** a fuzzy problem statement. Run 5 customer calls before feature design.`;
+      ? `Also spell out how you differ from ${[rival, second].filter(Boolean).join(" and ")}.`
+      : `And confirm what people use *instead* today before designing features.`,
+    `Close **one** of these this week with a single customer conversation.`,
+  ].join(" ");
 
   const victorContent =
     competition === "high"
-      ? `Don't compete head-on. Find a **10x wedge**: AI-native workflow, vertical niche (e.g. creative freelancers only), or bundling invoices with something incumbents can't ship in a quarter.`
-      : `Room to define the category — but move fast before a no-code template shop owns the narrative. What's the unfair advantage only you have?`;
+      ? `Don't fight ${rival} head-on. Find a **10x wedge** for **"${topic}"** — a narrow vertical, an AI-native workflow, or a bundle incumbents can't ship this quarter. What can only *you* do here?`
+      : `There's space to define the category around **"${topic}"** — but move before someone else owns the story. What's the unfair advantage (distribution, data, or insight) that others can't copy?`;
 
-  const mayaContent = `Picture one freelancer at 11pm on tax day. What are they doing **right before** your app exists? If you can't describe that scene in two sentences, the idea isn't concrete enough yet.`;
+  const mayaContent = [
+    `Picture the one person who needs **"${topic}"** most, in the moment right before your product exists.`,
+    `What are they doing *instead* today, and what's the specific frustration in that scene?`,
+    `If you can't describe it in two sentences, the target user isn't concrete enough yet.`,
+  ].join(" ");
 
   return [
     { agentId: forge.id, name: forge.name, role: "Critique · always challenges", content: forgeContent, color: forge.color },

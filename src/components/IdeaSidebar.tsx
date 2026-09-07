@@ -5,13 +5,16 @@ import {
   ChevronDown,
   ChevronRight,
   History,
-  Layers,
   Lightbulb,
   Link2,
+  MessagesSquare,
   MessageSquarePlus,
+  Network,
 } from "lucide-react";
 import type { ChatSession, IdeaGroup, IdeaRecord } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+export type SidebarTab = "chat" | "idea" | "history";
 
 const LAST_SESSION_KEY = "idea-forge:lastSessionId";
 
@@ -25,8 +28,11 @@ export function storeSessionId(id: string) {
 }
 
 interface IdeaSidebarProps {
+  tab: SidebarTab;
+  onTabChange: (tab: SidebarTab) => void;
   groups: IdeaGroup[];
   sessions: ChatSession[];
+  linkCount?: number;
   activeIdeaId?: string;
   activeSessionId?: string;
   ideaDetail?: IdeaRecord | null;
@@ -48,8 +54,11 @@ function formatWhen(iso: string) {
 }
 
 export function IdeaSidebar({
+  tab,
+  onTabChange,
   groups,
   sessions,
+  linkCount = 0,
   activeIdeaId,
   activeSessionId,
   ideaDetail,
@@ -59,7 +68,6 @@ export function IdeaSidebar({
   onNewSession,
   onClearIdea,
 }: IdeaSidebarProps) {
-  const [tab, setTab] = useState<"ideas" | "history">("ideas");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   const totalIdeas = groups.reduce((n, g) => n + g.ideas.length, 0);
@@ -68,43 +76,52 @@ export function IdeaSidebar({
     setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
+  const tabs: Array<{ id: SidebarTab; label: string; icon: typeof History }> = [
+    { id: "chat", label: "Chat", icon: MessagesSquare },
+    { id: "idea", label: "Idea", icon: Network },
+    { id: "history", label: "History", icon: History },
+  ];
+
   return (
     <aside className="flex h-full flex-col border-r border-zinc-800 bg-zinc-950/80">
       <div className="border-b border-zinc-800 px-3 py-3">
         <div className="flex gap-1 rounded-lg bg-zinc-900/80 p-1">
-          <button
-            type="button"
-            onClick={() => setTab("ideas")}
-            className={cn(
-              "flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
-              tab === "ideas" ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300"
-            )}
-          >
-            <Layers className="h-3.5 w-3.5" />
-            Ideas
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("history")}
-            className={cn(
-              "flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
-              tab === "history" ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300"
-            )}
-          >
-            <History className="h-3.5 w-3.5" />
-            History
-          </button>
+          {tabs.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => onTabChange(id)}
+              className={cn(
+                "flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
+                tab === id ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300"
+              )}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {tab === "ideas" && (
+      {tab === "chat" && (
         <>
+          <div className="border-b border-zinc-800 px-3 py-2">
+            <button
+              type="button"
+              onClick={onNewSession}
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600/90 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-500"
+            >
+              <MessageSquarePlus className="h-3.5 w-3.5" />
+              New conversation
+            </button>
+          </div>
           <div className="border-b border-zinc-800 px-4 py-2">
             <p className="text-xs text-zinc-500">
-              {totalIdeas} ideas · {groups.filter((g) => g.ideas.length > 1).length} groups
+              {totalIdeas} ideas · {groups.filter((g) => g.ideas.length > 1).length} connected
+              threads
             </p>
             <p className="mt-0.5 text-[10px] text-zinc-600">
-              Related ideas cluster together. Click to open memory thread.
+              Related conversations cluster together. Click one to open its connected thread.
             </p>
           </div>
 
@@ -228,6 +245,36 @@ export function IdeaSidebar({
         </>
       )}
 
+      {tab === "idea" && (
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="flex items-center gap-2 text-sm font-medium text-zinc-200">
+            <Network className="h-4 w-4 text-amber-400" />
+            Idea map
+          </div>
+          <p className="mt-2 text-xs text-zinc-500">
+            The panel on the right maps how your ideas connect. Each dot is an idea; lines are
+            the connections between them, and related ideas share a color.
+          </p>
+          <p className="mt-2 text-[11px] text-zinc-600">
+            {totalIdeas} ideas · {linkCount} connections
+          </p>
+          <ul className="mt-3 space-y-1.5 text-[11px] text-zinc-500">
+            <li className="flex items-start gap-1.5">
+              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+              Hover a link to see why two ideas are connected.
+            </li>
+            <li className="flex items-start gap-1.5">
+              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+              Thicker lines mean a stronger connection.
+            </li>
+            <li className="flex items-start gap-1.5">
+              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+              Click any idea to open its connected memory thread.
+            </li>
+          </ul>
+        </div>
+      )}
+
       {tab === "history" && (
         <>
           <div className="border-b border-zinc-800 px-3 py-2">
@@ -239,6 +286,11 @@ export function IdeaSidebar({
               <MessageSquarePlus className="h-3.5 w-3.5" />
               New conversation
             </button>
+          </div>
+          <div className="border-b border-zinc-800 px-4 py-2">
+            <p className="text-[10px] text-zinc-600">
+              Chronological log of every past conversation. Pick one to resume the full chat.
+            </p>
           </div>
           <div className="flex-1 overflow-y-auto p-2">
             {sessions.length === 0 ? (

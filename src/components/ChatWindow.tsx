@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Send, Sparkles, AlertCircle, Wand2, Brain } from "lucide-react";
+import { Send, Sparkles, AlertCircle, Wand2, Brain, Lightbulb, Link2 } from "lucide-react";
 import type { AgentInfo, BmadAgentId, ChatMessage, DepthScore, HonestyBreakdown } from "@/lib/types";
 import { HonestyBreakdownCard } from "@/components/HonestyBreakdownCard";
 import { DepthBadge } from "@/components/DepthBadge";
@@ -222,6 +222,7 @@ export function ChatWindow({
                 routeReason: routeReason || undefined,
                 perspectives: responsePerspectives,
                 showForgeActions: responseForgeActions,
+                depthScore: (payload.depthScore as DepthScore) ?? undefined,
                 createdAt: new Date().toISOString(),
               },
             ]);
@@ -271,6 +272,11 @@ export function ChatWindow({
 
   const routedAgentInfo = activeRoute ? getAgent(activeRoute.agentId) : null;
 
+  const ideaIdsInThread = new Set(
+    messages.map((m) => m.ideaId).filter((id): id is string => Boolean(id))
+  );
+  const isGroupThread = Boolean(activeIdeaId) && ideaIdsInThread.size > 1;
+
   return (
     <div className="flex h-full flex-col">
       <header className="border-b border-zinc-800 px-4 py-3">
@@ -303,11 +309,24 @@ export function ChatWindow({
         )}
         {activeIdeaId && ideaTitle && (
           <div className="mt-2 flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-100/90">
-            <Brain className="h-3.5 w-3.5 shrink-0 text-amber-400" />
-            <span>
-              Memory thread for <strong className="font-medium">{ideaTitle}</strong> — all past
-              messages about this idea across conversations
-            </span>
+            {isGroupThread ? (
+              <>
+                <Link2 className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+                <span>
+                  Connected memory thread — {ideaIdsInThread.size} related ideas (including{" "}
+                  <strong className="font-medium">{ideaTitle}</strong>) woven into one storyboard,
+                  in order. Each section below is labeled by idea.
+                </span>
+              </>
+            ) : (
+              <>
+                <Brain className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+                <span>
+                  Memory thread for <strong className="font-medium">{ideaTitle}</strong> — all past
+                  messages about this idea across conversations
+                </span>
+              </>
+            )}
           </div>
         )}
       </header>
@@ -328,13 +347,28 @@ export function ChatWindow({
         <div className="mx-auto max-w-3xl space-y-4">
           {messages.map((msg, index) => {
             const prev = messages[index - 1];
+            const showIdeaBreak =
+              isGroupThread &&
+              msg.ideaTitle &&
+              (!prev || prev.ideaId !== msg.ideaId);
             const showSessionBreak =
               activeIdeaId &&
+              !showIdeaBreak &&
               msg.sessionTitle &&
               (!prev || prev.sessionId !== msg.sessionId);
 
             return (
               <div key={msg.id} className="space-y-2">
+                {showIdeaBreak && (
+                  <div className="flex items-center gap-2 py-2">
+                    <div className="h-px flex-1 bg-amber-500/20" />
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/25 bg-amber-500/10 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-200/90">
+                      <Lightbulb className="h-3 w-3 text-amber-400/90" />
+                      {msg.ideaTitle}
+                    </span>
+                    <div className="h-px flex-1 bg-amber-500/20" />
+                  </div>
+                )}
                 {showSessionBreak && (
                   <div className="flex items-center gap-2 py-1">
                     <div className="h-px flex-1 bg-zinc-800" />
@@ -367,6 +401,11 @@ export function ChatWindow({
                     ) : (
                       <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
                     )}
+                    {msg.role === "assistant" && msg.depthScore && (
+                      <div className="mt-3">
+                        <DepthBadge score={msg.depthScore} />
+                      </div>
+                    )}
                     {msg.role === "assistant" && msg.perspectives && msg.perspectives.length > 0 && (
                       <PerspectiveCards perspectives={msg.perspectives} />
                     )}
@@ -377,14 +416,8 @@ export function ChatWindow({
                       />
                     )}
                     {msg.role === "user" && msg.honestyBreakdown && (
-                      <div className="mt-3 space-y-2">
-                        <HonestyBreakdownCard breakdown={msg.honestyBreakdown} compact />
-                        {msg.depthScore && <DepthBadge score={msg.depthScore} compact />}
-                      </div>
-                    )}
-                    {msg.role === "user" && !msg.honestyBreakdown && msg.depthScore && (
                       <div className="mt-3">
-                        <DepthBadge score={msg.depthScore} compact />
+                        <HonestyBreakdownCard breakdown={msg.honestyBreakdown} />
                       </div>
                     )}
                     {msg.relatedIdeas && msg.relatedIdeas.length > 0 && (

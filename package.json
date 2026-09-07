@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev --port 43123 --hostname 0.0.0.0",
+    "dev:stop": "pkill -f 'next dev --port 43123' 2>/dev/null || true",
+    "dev:restart": "npm run dev:stop && npm run dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"

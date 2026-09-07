@@ -27,6 +27,16 @@ npm run dev
 
 Open [http://localhost:43123](http://localhost:43123).
 
+### Dev server commands
+
+```bash
+npm run dev          # start (foreground — Ctrl+C to stop)
+npm run dev:stop     # stop if port 43123 is already in use
+npm run dev:restart  # stop + start (use after editing .env.local)
+```
+
+If `EADDRINUSE` appears, run `npm run dev:stop` first, then `npm run dev`.
+
 ## BMAD Integration
 
 BMAD skills are installed under `.agents/skills/` (39 skills including CIS and BMad Method). The app loads each agent's `SKILL.md` as the system prompt when calling the Cursor SDK.

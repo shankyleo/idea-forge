@@ -12,6 +12,7 @@ import { findRelatedIdeas, linkRelatedIdeas } from "@/lib/idea-linker";
 import { runDeepRecon } from "@/lib/web-research";
 import { shouldRunWebResearch, isCasualMessage } from "@/lib/message-utils";
 import { runHonestyBreakdown } from "@/lib/honesty-agent";
+import { scoreHonesty } from "@/lib/honesty-scorer";
 import { routeMessage } from "@/lib/agent-router";
 import { generatePerspectives } from "@/lib/panel-perspectives";
 import type { DepthScore, HonestyBreakdown, AgentPerspective } from "@/lib/types";
@@ -138,12 +139,21 @@ export async function POST(request: Request) {
           };
         }
 
+        const ruleHonesty = casual
+          ? undefined
+          : scoreHonesty(message, {
+              competitionLevel: depthScore?.competitionLevel ?? reconResult?.depth.competitionLevel,
+              depthScore: depthScore?.overall ?? reconResult?.depth.depthScore,
+              hasResearch: Boolean(reconResult),
+            });
+
         if (!casual && agentId !== "honesty-coach") {
           perspectives = generatePerspectives({
             message: topicMessage ?? message,
             depthScore,
             recon: reconResult,
             primaryAgentId: agentId,
+            honesty: ruleHonesty,
           });
         }
 
@@ -153,6 +163,11 @@ export async function POST(request: Request) {
           honestyBreakdown = result.breakdown ?? undefined;
           honestyNarrative = result.narrative;
         }
+
+        // Always attach a dynamic, input-driven honesty breakdown. The live
+        // Honesty Coach (when routed) wins; otherwise the rule-based baseline
+        // keeps every idea grounded.
+        honestyBreakdown = honestyBreakdown ?? ruleHonesty;
 
         saveMessage({
           id: userMsgId,
@@ -224,9 +239,15 @@ export async function POST(request: Request) {
           matchedAgents: route.matchedAgents,
           perspectives,
           showForgeActions: !casual && agentId !== "honesty-coach",
+          depthScore,
         });
 
-        send({ type: "done", perspectives, showForgeActions: !casual && agentId !== "honesty-coach" });
+        send({
+          type: "done",
+          perspectives,
+          showForgeActions: !casual && agentId !== "honesty-coach",
+          depthScore,
+        });
       } catch (error) {
         send({
           type: "error",

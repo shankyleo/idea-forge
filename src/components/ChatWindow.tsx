@@ -222,6 +222,7 @@ export function ChatWindow({
                 routeReason: routeReason || undefined,
                 perspectives: responsePerspectives,
                 showForgeActions: responseForgeActions,
+                depthScore: (payload.depthScore as DepthScore) ?? undefined,
                 createdAt: new Date().toISOString(),
               },
             ]);
@@ -367,6 +368,11 @@ export function ChatWindow({
                     ) : (
                       <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
                     )}
+                    {msg.role === "assistant" && msg.depthScore && (
+                      <div className="mt-3">
+                        <DepthBadge score={msg.depthScore} />
+                      </div>
+                    )}
                     {msg.role === "assistant" && msg.perspectives && msg.perspectives.length > 0 && (
                       <PerspectiveCards perspectives={msg.perspectives} />
                     )}
@@ -377,14 +383,8 @@ export function ChatWindow({
                       />
                     )}
                     {msg.role === "user" && msg.honestyBreakdown && (
-                      <div className="mt-3 space-y-2">
-                        <HonestyBreakdownCard breakdown={msg.honestyBreakdown} compact />
-                        {msg.depthScore && <DepthBadge score={msg.depthScore} compact />}
-                      </div>
-                    )}
-                    {msg.role === "user" && !msg.honestyBreakdown && msg.depthScore && (
                       <div className="mt-3">
-                        <DepthBadge score={msg.depthScore} compact />
+                        <HonestyBreakdownCard breakdown={msg.honestyBreakdown} />
                       </div>
                     )}
                     {msg.relatedIdeas && msg.relatedIdeas.length > 0 && (

@@ -147,7 +147,9 @@ export function ChatWindow({
                     : m
                 )
               );
-              setLastHonesty(payload.honestyScore as HonestyScore);
+              setLastHonesty(
+                payload.honestyScore ? (payload.honestyScore as HonestyScore) : null
+              );
               if (payload.depthScore) setLastDepth(payload.depthScore as DepthScore);
               setLastRelated((payload.relatedIdeas as typeof lastRelated) ?? []);
               metaApplied = true;
@@ -235,8 +237,7 @@ export function ChatWindow({
               challenge, and connect it to your other ideas.
             </p>
             <p className="mt-2 text-xs text-zinc-600">
-              Say hi to get started, or try: &quot;I want to build a SaaS that helps freelancers
-              track invoices&quot;
+              Say hi to get started. Honesty &amp; depth scores appear when you share a real idea.
             </p>
           </div>
         )}

@@ -9,7 +9,8 @@ export interface AgentRunOptions {
   message: string;
   history: Array<{ role: "user" | "assistant"; content: string }>;
   relatedIdeas: Array<{ title: string; summary: string; reason: string }>;
-  honestyScore: HonestyScore;
+  honestyScore?: HonestyScore;
+  skipScoring?: boolean;
   ideaTitle?: string;
   researchBlock?: string;
   depthScore?: DepthScore;
@@ -49,7 +50,7 @@ async function* streamWithCursorSdk(
   const { Agent } = await import("@cursor/sdk");
   const systemPrompt = buildSystemPrompt(options.agentId, {
     relatedIdeas: options.relatedIdeas,
-    honestyScore: options.honestyScore,
+    honestyScore: options.skipScoring ? undefined : options.honestyScore,
     ideaTitle: options.ideaTitle,
     researchBlock: options.researchBlock,
   });
@@ -117,7 +118,8 @@ async function* streamFallbackResponse(
   options: AgentRunOptions,
   error?: unknown
 ): AsyncGenerator<string, void, unknown> {
-  const { agentId, message, honestyScore, relatedIdeas, researchBlock, depthScore } = options;
+  const { agentId, message, honestyScore, relatedIdeas, researchBlock, depthScore, skipScoring } =
+    options;
   const errorNote = error
     ? `\n\n*(Cursor API unavailable — running in local guidance mode. Set \`CURSOR_API_KEY\` for full BMAD agent responses.)*`
     : `\n\n*(Demo mode — add \`CURSOR_API_KEY\` from [Cursor Dashboard → API Keys](https://cursor.com/dashboard/api) for live BMAD agents.)*`;
@@ -129,52 +131,51 @@ async function* streamFallbackResponse(
           .join("\n")}`
       : "";
 
+  const honestyNote =
+    skipScoring || !honestyScore
+      ? ""
+      : `\n\nYour honesty score is **${honestyScore.overall}/100**. ${honestyScore.summary}${honestyScore.flags.length ? `\n\nFlags: ${honestyScore.flags.join("; ")}` : ""}`;
+
   const responses: Record<BmadAgentId, string> = {
     forge: `I'll pressure-test this idea with you.
 
-**First probe:** What specific problem does this solve, and for whom — not "everyone," but one concrete person?
-
-Your honesty score is **${honestyScore.overall}/100**. ${honestyScore.summary}${honestyScore.flags.length ? `\n\nFlags: ${honestyScore.flags.join("; ")}` : ""}
+**First probe:** What specific problem does this solve, and for whom — not "everyone," but one concrete person?${honestyNote}
 
 Say **"attack this"** to argue against it, **"defend this"** for the strongest case, or answer the question above.${relatedNote}${errorNote}`,
 
     brainstorm: `Let's brainstorm on: "${message.slice(0, 80)}..."
 
-**Technique: Reverse brainstorming** — What would make this idea fail spectacularly? List 5 failure modes, then flip each into a design constraint.
+**Technique: Reverse brainstorming** — What would make this idea fail spectacularly? List 5 failure modes, then flip each into a design constraint.${honestyNote ? `\n\nHonesty: **${honestyScore!.overall}/100** — ${honestyScore!.summary}` : ""}${relatedNote}${errorNote}`,
 
-Honesty: **${honestyScore.overall}/100** — ${honestyScore.summary}${relatedNote}${errorNote}`,
-
-    "deep-recon": formatDeepReconResponse(message, honestyScore, relatedNote, errorNote, researchBlock, depthScore),
+    "deep-recon": formatDeepReconResponse(
+      message,
+      honestyScore,
+      relatedNote,
+      errorNote,
+      researchBlock,
+      depthScore
+    ),
 
     "red-team": `**Adversarial review**
 
 | Lens | Finding |
 |------|---------|
-| Missing evidence | ${honestyScore.evidence < 60 ? "Claims lack data or sources" : "Some grounding present"} |
-| Assumptions | ${honestyScore.assumptions < 60 ? "Untested assumptions detected" : "Assumptions mostly explicit"} |
-| Feasibility | ${honestyScore.feasibility < 60 ? "Complexity may be underestimated" : "Feasibility seems considered"} |
+| Missing evidence | ${!honestyScore || honestyScore.evidence < 60 ? "Claims lack data or sources" : "Some grounding present"} |
+| Assumptions | ${!honestyScore || honestyScore.assumptions < 60 ? "Untested assumptions detected" : "Assumptions mostly explicit"} |
+| Feasibility | ${!honestyScore || honestyScore.feasibility < 60 ? "Complexity may be underestimated" : "Feasibility seems considered"} |
+${honestyScore ? `\n**Overall honesty: ${honestyScore.overall}/100** — ${honestyScore.summary}` : ""}${relatedNote}${errorNote}`,
 
-**Overall honesty: ${honestyScore.overall}/100** — ${honestyScore.summary}${relatedNote}${errorNote}`,
+    "design-thinking": `**Empathy check:** Describe one real user who would use this. What's their day like *before* your idea exists?${honestyNote}${relatedNote}${errorNote}`,
 
-    "design-thinking": `**Empathy check:** Describe one real user who would use this. What's their day like *before* your idea exists?
+    innovation: `**Innovation lens:** Is this a 10x improvement or a feature parity play? What's the unfair advantage?${honestyNote ? `\n\nHonesty: **${honestyScore!.overall}/100**` : ""}${relatedNote}${errorNote}`,
 
-Honesty score: **${honestyScore.overall}/100**. ${honestyScore.summary}${relatedNote}${errorNote}`,
-
-    innovation: `**Innovation lens:** Is this a 10x improvement or a feature parity play? What's the unfair advantage?
-
-Honesty: **${honestyScore.overall}/100**${relatedNote}${errorNote}`,
-
-    "problem-solving": `**Root cause:** State the problem as a symptom. Now ask "why" five times. What's the actual root?
-
-Honesty: **${honestyScore.overall}/100** — ${honestyScore.summary}${relatedNote}${errorNote}`,
+    "problem-solving": `**Root cause:** State the problem as a symptom. Now ask "why" five times. What's the actual root?${honestyNote}${relatedNote}${errorNote}`,
 
     "party-mode": `**Panel discussion** (simulated):
 
 - **Forge:** What's the weakest assumption here?
 - **Mary (Analyst):** What data would validate this?
-- **Victor:** Where's the disruption angle?
-
-Honesty score: **${honestyScore.overall}/100**${relatedNote}${errorNote}`,
+- **Victor:** Where's the disruption angle?${honestyNote ? `\n\nHonesty score: **${honestyScore!.overall}/100**` : ""}${relatedNote}${errorNote}`,
   };
 
   const response = responses[agentId] ?? responses.forge;
@@ -187,7 +188,7 @@ Honesty score: **${honestyScore.overall}/100**${relatedNote}${errorNote}`,
 
 function formatDeepReconResponse(
   message: string,
-  honestyScore: HonestyScore,
+  honestyScore: HonestyScore | undefined,
   relatedNote: string,
   errorNote: string,
   researchBlock?: string,
@@ -216,7 +217,7 @@ ${depthSection}${researchSection}## What this means for your idea
 Based on live search for: "${message.slice(0, 120)}..."
 
 1. **Does it have depth?** ${depthScore ? (depthScore.overall >= 55 ? "Possibly — but validate with customer interviews." : "Unclear or crowded — narrow the niche.") : "Run again with a more specific problem statement."}
-2. **Honesty of your claim:** ${honestyScore.overall}/100 — ${honestyScore.summary}
+${honestyScore ? `2. **Honesty of your claim:** ${honestyScore.overall}/100 — ${honestyScore.summary}` : "2. **Next:** Share a concrete idea to get an honesty score."}
 3. **Next step:** Pick one competitor from the results above and explain how you'd be 10x better for one user segment.
 
 ${relatedNote}${errorNote}`;

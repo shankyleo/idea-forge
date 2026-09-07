@@ -11,7 +11,7 @@ import { streamAgentResponse } from "@/lib/cursor-agent";
 import { scoreHonesty } from "@/lib/honesty-scorer";
 import { findRelatedIdeas, linkRelatedIdeas } from "@/lib/idea-linker";
 import { runDeepRecon } from "@/lib/web-research";
-import { shouldRunWebResearch } from "@/lib/message-utils";
+import { shouldRunWebResearch, isCasualMessage } from "@/lib/message-utils";
 import type { BmadAgentId, DepthScore } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -43,15 +43,16 @@ export async function POST(request: Request) {
   const agentId = requestedAgentId ?? session.activeAgentId;
   updateSession(sessionId, { activeAgentId: agentId });
 
-  const honestyScore = scoreHonesty(message);
-  const extractedIdea = extractAndSaveIdea(message, sessionId);
+  const casual = isCasualMessage(message);
+  const honestyScore = casual ? undefined : scoreHonesty(message);
+  const extractedIdea = casual ? null : extractAndSaveIdea(message, sessionId);
   const ideaId = extractedIdea?.id ?? session.activeIdeaId;
 
   if (extractedIdea && !session.activeIdeaId) {
     updateSession(sessionId, { activeIdeaId: extractedIdea.id });
   }
 
-  const related = findRelatedIdeas(message, ideaId);
+  const related = casual ? [] : findRelatedIdeas(message, ideaId);
   if (ideaId && related.length > 0) {
     linkRelatedIdeas(ideaId, related);
   }
@@ -134,6 +135,7 @@ export async function POST(request: Request) {
           history: history.slice(0, -1),
           relatedIdeas: relatedForPrompt,
           honestyScore,
+          skipScoring: casual,
           ideaTitle: extractedIdea?.title ?? ideaTitle,
           researchBlock,
           depthScore,

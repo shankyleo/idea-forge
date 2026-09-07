@@ -25,8 +25,8 @@ Share something specific, for example:
 - "SaaS for freelancers to track invoices"
 - "AI app that helps restaurants manage inventory"
 
-I'll run live market research, show competitors, and give you a depth score + honesty check.`;
+When you share a real idea, I'll run live market research and show honesty + depth scores.`;
   }
 
-  return `Hey! I'm ready when you are. Describe an app idea, business concept, or problem you want to think through — I'll score your claims and push back where needed.`;
+  return `Hey! I'm ready when you are. Describe an app idea, business concept, or problem you want to think through — I'll score your claims when you share something substantive.`;
 }

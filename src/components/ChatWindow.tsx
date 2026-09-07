@@ -145,7 +145,6 @@ export function ChatWindow({
   >([]);
   const [similarNudge, setSimilarNudge] = useState<SimilarIdeaNudge | null>(null);
   const [ideaHonesty, setIdeaHonesty] = useState<HonestyBreakdown | null>(null);
-  const [ideaHonestyDelta, setIdeaHonestyDelta] = useState<number | undefined>();
   const [panelPerspectives, setPanelPerspectives] = useState<AgentPerspective[]>([]);
   const [slashPickerIndex, setSlashPickerIndex] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -171,11 +170,10 @@ export function ChatWindow({
     } else {
       setIdeaHonesty(null);
     }
-    setIdeaHonestyDelta(undefined);
   }, [sessionId]);
 
   const patchSession = useCallback(
-    async (patch: { title?: string; pinned?: boolean }) => {
+    async (patch: { title?: string }) => {
       const res = await fetch("/api/sessions", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -196,27 +194,9 @@ export function ChatWindow({
 
   const turns = useMemo(() => groupIntoTurns(messages), [messages]);
 
-  const livePanel =
-    loading && (streamingPerspectives.length > 0 || panelPerspectives.length > 0)
-      ? streamingPerspectives.length > 0
-        ? streamingPerspectives
-        : panelPerspectives
-      : null;
+  const turnHonestyMap = useMemo(() => turnHonestyByUserId(turns), [turns]);
 
-  const turnHonestyMap = useMemo(
-    () => turnHonestyByUserId(turns, ideaHonesty, livePanel),
-    [turns, ideaHonesty, livePanel]
-  );
-
-  const headerHonesty = useMemo(() => {
-    return latestVisibleChatHonesty({
-      turns,
-      ideaHonesty,
-      liveDelta: ideaHonestyDelta,
-      isLiveTurn: loading,
-      livePanel,
-    });
-  }, [turns, ideaHonesty, ideaHonestyDelta, loading, livePanel]);
+  const headerHonesty = useMemo(() => latestVisibleChatHonesty(turns), [turns]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -337,14 +317,12 @@ export function ChatWindow({
             const userMessageId = (payload.userMessageId as string) ?? optimisticUser.id;
             setStatusLine(null);
             if (!metaApplied) {
-              const grounding = payload.honestyBreakdown as HonestyBreakdown | undefined;
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === optimisticUser.id
                     ? {
                         ...m,
                         id: userMessageId,
-                        honestyBreakdown: grounding,
                         depthScore: payload.depthScore as DepthScore | undefined,
                         relatedIdeas: payload.relatedIdeas as ChatMessage["relatedIdeas"],
                         ideaId: payload.ideaId as string | undefined,
@@ -356,14 +334,6 @@ export function ChatWindow({
               setLastRelated((payload.relatedIdeas as typeof lastRelated) ?? []);
               if (payload.similarIdeaNudge) {
                 setSimilarNudge(payload.similarIdeaNudge as SimilarIdeaNudge);
-              }
-              if (grounding) {
-                setIdeaHonesty(grounding);
-              } else if (payload.ideaHonesty) {
-                setIdeaHonesty(payload.ideaHonesty as HonestyBreakdown);
-              }
-              if (typeof payload.ideaHonestyDelta === "number") {
-                setIdeaHonestyDelta(payload.ideaHonestyDelta as number);
               }
               if (payload.perspectives && !responsePerspectives.length) {
                 responsePerspectives = payload.perspectives as AgentPerspective[];
@@ -382,9 +352,6 @@ export function ChatWindow({
             doneReceived = true;
             const finalGrounding = payload.honestyBreakdown as HonestyBreakdown | undefined;
             const doneUserId = payload.userMessageId as string | undefined;
-            if (payload.ideaHonesty) {
-              setIdeaHonesty(payload.ideaHonesty as HonestyBreakdown);
-            }
             if (finalGrounding && doneUserId) {
               setMessages((prev) =>
                 prev.map((m) =>
@@ -392,7 +359,9 @@ export function ChatWindow({
                 )
               );
             }
-            setIdeaHonestyDelta(undefined);
+            if (payload.ideaHonesty) {
+              setIdeaHonesty(payload.ideaHonesty as HonestyBreakdown);
+            }
             setMessages((prev) => [
               ...prev,
               {
@@ -639,10 +608,7 @@ export function ChatWindow({
                 : null;
             const turnHonesty = turnHonestyMap.get(turn.user.id);
             const grounding = turnHonesty?.breakdown;
-            const turnDelta =
-              isLiveTurn && typeof ideaHonestyDelta === "number"
-                ? ideaHonestyDelta
-                : turnHonesty?.delta;
+            const turnDelta = turnHonesty?.delta;
             const groundingVariant =
               turn.assistant?.agentId === "honesty-coach" ? "coach" : "grounding";
 
@@ -675,7 +641,7 @@ export function ChatWindow({
                   />
                 ) : null}
 
-                {grounding && (
+                {grounding && !(isLiveTurn && loading) && (
                   <HonestyBreakdownCard
                     breakdown={grounding}
                     variant={groundingVariant}

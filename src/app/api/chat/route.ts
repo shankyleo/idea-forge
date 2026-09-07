@@ -204,7 +204,6 @@ export async function POST(request: Request) {
       let depthScore: DepthScore | undefined;
       let reconResult: DeepReconResult | undefined;
       let honestyBreakdown: HonestyBreakdown | undefined;
-      let turnHonesty: HonestyBreakdown | undefined;
       let honestyNarrative: string | undefined;
       let ideaHonestyDelta: number | undefined;
       let perspectives: AgentPerspective[] = [];
@@ -262,36 +261,6 @@ export async function POST(request: Request) {
           honestyNarrative = result.narrative;
         }
 
-        if (!casual && agentId !== "honesty-coach") {
-          turnHonesty = scoreHonesty(
-            buildHonestyInput(workingMessage, perspectives),
-            honestyContext(depthScore, reconResult)
-          );
-        }
-
-        if (shouldTrackIdeaHonesty(slash, casual) && ideaId) {
-          const { breakdown, delta } = computeIdeaHonestyUpdate({
-            ideaId,
-            userMessage: workingMessage,
-            perspectives,
-            competitionLevel: depthScore?.competitionLevel ?? reconResult?.depth.competitionLevel,
-            depthScore: depthScore?.overall ?? reconResult?.depth.depthScore,
-            hasResearch: Boolean(reconResult),
-          });
-          if (!turnHonesty) turnHonesty = breakdown;
-          ideaHonestyDelta = delta;
-          if (agentId === "honesty-coach" && honestyBreakdown) {
-            honestyBreakdown = breakdown;
-          }
-        }
-
-        const userHonestyBreakdown =
-          agentId === "honesty-coach" && honestyBreakdown
-            ? honestyBreakdown
-            : !casual
-              ? turnHonesty
-              : undefined;
-
         const depthForClient = runResearch ? depthScore : undefined;
 
         saveMessage({
@@ -299,7 +268,6 @@ export async function POST(request: Request) {
           sessionId,
           role: "user",
           content: message,
-          honestyBreakdown: userHonestyBreakdown,
           depthScore: depthForClient,
           ideaId,
           relatedIdeas: relatedForClient,
@@ -307,11 +275,6 @@ export async function POST(request: Request) {
 
         send({
           type: "meta",
-          honestyBreakdown: userHonestyBreakdown,
-          ideaHonesty: shouldTrackIdeaHonesty(slash, casual) && ideaId
-            ? getIdeaHonestySnapshot(ideaId) ?? undefined
-            : undefined,
-          ideaHonestyDelta: shouldTrackIdeaHonesty(slash, casual) ? ideaHonestyDelta : undefined,
           depthScore: depthForClient,
           relatedIdeas: relatedForClient,
           similarIdeaNudge,
@@ -352,18 +315,19 @@ export async function POST(request: Request) {
           }
         }
 
+        let finalUserHonesty: HonestyBreakdown | undefined;
         if (!casual) {
-          const finalHonesty =
+          finalUserHonesty =
             agentId === "honesty-coach" && honestyBreakdown
               ? honestyBreakdown
               : scoreHonesty(
                   buildHonestyInput(workingMessage, perspectives, fullResponse.trim()),
                   honestyContext(depthScore, reconResult)
                 );
-          updateMessageHonestyBreakdown(userMsgId, finalHonesty);
+          updateMessageHonestyBreakdown(userMsgId, finalUserHonesty);
 
           if (shouldTrackIdeaHonesty(slash, casual) && ideaId) {
-            computeIdeaHonestyUpdate({
+            const { delta } = computeIdeaHonestyUpdate({
               ideaId,
               userMessage: workingMessage,
               perspectives,
@@ -372,17 +336,9 @@ export async function POST(request: Request) {
               depthScore: depthScore?.overall ?? reconResult?.depth.depthScore,
               hasResearch: Boolean(reconResult),
             });
+            ideaHonestyDelta = delta;
           }
         }
-
-        const finalUserHonesty = !casual
-          ? agentId === "honesty-coach" && honestyBreakdown
-            ? honestyBreakdown
-            : scoreHonesty(
-                buildHonestyInput(workingMessage, perspectives, fullResponse.trim()),
-                honestyContext(depthScore, reconResult)
-              )
-          : undefined;
 
         saveMessage({
           id: assistantMsgId,
@@ -406,7 +362,8 @@ export async function POST(request: Request) {
           ideaHonesty: shouldTrackIdeaHonesty(slash, casual) && ideaId
             ? getIdeaHonestySnapshot(ideaId) ?? undefined
             : undefined,
-          honestyBreakdown: finalUserHonesty ?? userHonestyBreakdown,
+          honestyBreakdown: finalUserHonesty,
+          ideaHonestyDelta: shouldTrackIdeaHonesty(slash, casual) ? ideaHonestyDelta : undefined,
           userMessageId: userMsgId,
         });
       } catch (error) {

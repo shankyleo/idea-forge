@@ -1,4 +1,4 @@
-import type { AgentPerspective, ChatMessage, HonestyBreakdown } from "@/lib/types";
+import type { ChatMessage, HonestyBreakdown } from "@/lib/types";
 import { isCasualMessage } from "@/lib/message-utils";
 import { scoreHonesty } from "@/lib/honesty-scorer";
 import { parseSlashCommand } from "@/lib/slash-commands";
@@ -25,7 +25,6 @@ export function honestySpectrumStyles(score: number): {
   track: string;
 } {
   const t = Math.max(0, Math.min(100, score)) / 100;
-  // 8° ≈ red → 145° ≈ green
   const hue = 8 + t * 137;
   return {
     stroke: `hsl(${hue} 78% 52%)`,
@@ -47,48 +46,30 @@ export function honestyRingColor(score: number): string {
   return "border-rose-500/50 bg-rose-500/10";
 }
 
-/** Honesty for a turn — prefer stored breakdown from the server, else compute for legacy rows. */
-export function getTurnHonestyBreakdown(
-  turn: ChatTurn,
-  ideaHonesty: HonestyBreakdown | null,
-  isLastTurn: boolean,
-  livePanel?: AgentPerspective[] | null
-): HonestyBreakdown | undefined {
+/** Only show honesty once the server saved a breakdown for the turn (after the agent finishes). */
+export function getTurnHonestyBreakdown(turn: ChatTurn): HonestyBreakdown | undefined {
   if (turn.user.honestyBreakdown) return turn.user.honestyBreakdown;
 
   if (!turn.user.content || isCasualMessage(turn.user.content)) return undefined;
+  if (parseSlashCommand(turn.user.content.trim())) return undefined;
+  if (!turn.assistant) return undefined;
 
-  const slash = parseSlashCommand(turn.user.content.trim());
-  if (slash) return undefined;
-
-  if (isLastTurn && ideaHonesty) return ideaHonesty;
-
-  const perspectives = turn.assistant?.perspectives ?? livePanel ?? [];
+  const perspectives = turn.assistant.perspectives ?? [];
   const panelText = perspectives.map((p) => p.content).join("\n");
   const combined = [turn.user.content, panelText].filter(Boolean).join("\n\n");
   return scoreHonesty(combined, {
-    hasResearch: Boolean(turn.assistant?.depthScore ?? livePanel?.length),
-    depthScore: turn.assistant?.depthScore?.overall,
-    competitionLevel: turn.assistant?.depthScore?.competitionLevel,
+    hasResearch: Boolean(turn.assistant.depthScore),
+    depthScore: turn.assistant.depthScore?.overall,
+    competitionLevel: turn.assistant.depthScore?.competitionLevel,
   });
 }
 
-export function getTurnHonestyScores(input: {
-  turns: ChatTurn[];
-  ideaHonesty?: HonestyBreakdown | null;
-  livePanel?: AgentPerspective[] | null;
-}): TurnHonesty[] {
-  const { turns, ideaHonesty, livePanel } = input;
+export function getTurnHonestyScores(turns: ChatTurn[]): TurnHonesty[] {
   const out: TurnHonesty[] = [];
   let prevScore: number | undefined;
 
-  for (let i = 0; i < turns.length; i++) {
-    const breakdown = getTurnHonestyBreakdown(
-      turns[i],
-      ideaHonesty ?? null,
-      i === turns.length - 1,
-      i === turns.length - 1 ? livePanel : null
-    );
+  for (const turn of turns) {
+    const breakdown = getTurnHonestyBreakdown(turn);
     if (!breakdown) continue;
 
     const score = averageHonestyScore(breakdown);
@@ -104,46 +85,24 @@ export function getTurnHonestyScores(input: {
   return out;
 }
 
-export function latestVisibleChatHonesty(input: {
-  turns: ChatTurn[];
-  ideaHonesty?: HonestyBreakdown | null;
-  liveDelta?: number;
-  isLiveTurn?: boolean;
-  livePanel?: AgentPerspective[] | null;
-}): { score: number; delta?: number } | null {
-  const scores = getTurnHonestyScores(input);
-
+export function latestVisibleChatHonesty(turns: ChatTurn[]): { score: number; delta?: number } | null {
+  const scores = getTurnHonestyScores(turns);
   if (scores.length === 0) return null;
-
   const last = scores[scores.length - 1];
-
-  if (input.isLiveTurn && typeof input.liveDelta === "number" && input.liveDelta !== 0) {
-    return { score: last.score, delta: input.liveDelta };
-  }
-
   return { score: last.score, delta: last.delta };
 }
 
-export function turnHonestyByUserId(
-  turns: ChatTurn[],
-  ideaHonesty: HonestyBreakdown | null,
-  livePanel?: AgentPerspective[] | null
-): Map<string, TurnHonesty> {
+export function turnHonestyByUserId(turns: ChatTurn[]): Map<string, TurnHonesty> {
   const map = new Map<string, TurnHonesty>();
   let prevScore: number | undefined;
 
-  for (let i = 0; i < turns.length; i++) {
-    const breakdown = getTurnHonestyBreakdown(
-      turns[i],
-      ideaHonesty,
-      i === turns.length - 1,
-      i === turns.length - 1 ? livePanel : null
-    );
+  for (const turn of turns) {
+    const breakdown = getTurnHonestyBreakdown(turn);
     if (!breakdown) continue;
 
     const score = averageHonestyScore(breakdown);
     const delta = prevScore !== undefined ? score - prevScore : undefined;
-    map.set(turns[i].user.id, {
+    map.set(turn.user.id, {
       breakdown,
       score,
       delta: delta !== 0 ? delta : undefined,

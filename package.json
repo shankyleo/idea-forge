@@ -8,7 +8,9 @@
     "dev:restart": "npm run dev:stop && npm run dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "prepare": "git config core.hooksPath .githooks 2>/dev/null || true && chmod +x scripts/push-remotes.sh .githooks/post-commit 2>/dev/null || true",
+    "push:github": "bash scripts/push-remotes.sh"
   },
   "dependencies": {
     "@cursor/sdk": "^1.0.31",

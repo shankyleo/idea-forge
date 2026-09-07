@@ -1,0 +1,22 @@
+{
+  "name": "Idea Forge",
+  "install": "npm install",
+  "start": "npm run dev:stop || true",
+  "terminals": [
+    {
+      "name": "dev",
+      "command": "npm run dev"
+    }
+  ],
+  "ports": [
+    {
+      "port": 43123,
+      "name": "Idea Forge"
+    }
+  ],
+  "repositoryDependencies": [
+    {
+      "repoUrl": "https://github.com/shankyleo/idea-forge"
+    }
+  ]
+}

@@ -4,10 +4,13 @@ A BMAD-powered thinking companion that helps you brainstorm, research, pressure-
 
 **Repository:** https://github.com/shankyleo/idea-forge
 
+Cloud Agents should open this GitHub repo (not the Cursor tmp repo). Add `GITHUB_TOKEN` (repo scope) and `CURSOR_API_KEY` as environment secrets for push + live agents.
+
 ## Features
 
-- **BMAD agents** — Deep Recon (default), Forge, Carson, Red Team, Maya, Victor, Dr. Quinn, Party Mode, **Honesty Coach**
-- **Honesty Coach** — Six-dimension breakdown (evidence, specificity, assumptions, feasibility, market awareness, confidence calibration). No single overall score. Only runs when you select Honesty Coach — casual messages like "hi" are not scored.
+- **Auto-routing BMAD agents** — type anything; the app picks Deep Recon, Forge, Honesty Coach, Party Mode, etc.
+- **BMAD agents** — Deep Recon, Forge, Carson, Red Team, Maya, Victor, Dr. Quinn, Party Mode, **Honesty Coach**
+- **Honesty Coach** — Six-dimension breakdown (evidence, specificity, assumptions, feasibility, market awareness, confidence calibration). No single overall score. Routed automatically when your message has bold claims.
 - **Deep Recon** — Live web search with idea depth score (competition, market signals, go/no-go guidance)
 - **Idea vault** — Ideas are auto-captured from chat and linked when related
 - **Cursor API** — Live agent responses via `@cursor/sdk` when `CURSOR_API_KEY` is set
@@ -28,6 +31,23 @@ npm run dev
 ```
 
 Open [http://localhost:43123](http://localhost:43123).
+
+### Git push (GitHub)
+
+After `npm install`, a **post-commit hook** pushes `main` to GitHub (`github` remote) and Cursor origin on every commit. Requires `GITHUB_TOKEN` in the environment (Cloud Agent secrets).
+
+Manual push:
+
+```bash
+npm run push:github
+```
+
+## Cloud Agent setup
+
+1. Create/open Cloud Agent from **https://github.com/shankyleo/idea-forge**
+2. Environment secrets: `GITHUB_TOKEN`, `CURSOR_API_KEY`
+3. `.cursor/environment.json` installs deps and starts the dev server on port **43123**
+
 
 ### Dev server commands
 

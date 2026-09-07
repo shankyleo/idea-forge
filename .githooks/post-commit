@@ -1,0 +1,4 @@
+#!/bin/sh
+# Auto-push to GitHub + Cursor origin after every commit.
+# Enabled via: npm install (prepare script sets core.hooksPath)
+exec "$(git rev-parse --show-toplevel)/scripts/push-remotes.sh"

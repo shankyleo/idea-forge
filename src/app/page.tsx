@@ -1,9 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { AgentInfo, ChatSession, IdeaGroup, IdeaRecord } from "@/lib/types";
-import { IdeaSidebar, getStoredSessionId, storeSessionId } from "@/components/IdeaSidebar";
+import type { AgentInfo, ChatSession, IdeaGraph, IdeaGroup, IdeaRecord } from "@/lib/types";
+import {
+  IdeaSidebar,
+  getStoredSessionId,
+  storeSessionId,
+  type SidebarTab,
+} from "@/components/IdeaSidebar";
 import { ChatWindow } from "@/components/ChatWindow";
+import { IdeaMap } from "@/components/IdeaMap";
 
 const INIT_TIMEOUT_MS = 15_000;
 
@@ -34,6 +40,15 @@ export default function HomePage() {
   const [cursorApiConfigured, setCursorApiConfigured] = useState(false);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<SidebarTab>("chat");
+  const [graph, setGraph] = useState<IdeaGraph>({ nodes: [], edges: [] });
+
+  const loadGraph = useCallback(async () => {
+    const res = await fetchWithTimeout("/api/ideas?graph=1");
+    if (!res.ok) return;
+    const data = await res.json();
+    setGraph({ nodes: data.nodes ?? [], edges: data.edges ?? [] });
+  }, []);
 
   const loadSidebar = useCallback(async () => {
     const [ideasRes, sessionsRes] = await Promise.all([
@@ -145,6 +160,14 @@ export default function HomePage() {
     [loadSidebar]
   );
 
+  const handleTabChange = useCallback(
+    (next: SidebarTab) => {
+      setTab(next);
+      if (next === "idea") void loadGraph();
+    },
+    [loadGraph]
+  );
+
   const handleSelectIdea = useCallback(
     async (ideaId: string) => {
       const res = await fetchWithTimeout(`/api/sessions?ideaId=${ideaId}`);
@@ -156,6 +179,8 @@ export default function HomePage() {
       }
       setActiveIdeaId(ideaId);
       setIdeaDetail(data.idea ?? null);
+      // Opening an idea shows its connected thread in the chat view.
+      setTab("chat");
       await loadIdeaDetail(ideaId);
       await loadSidebar();
     },
@@ -194,7 +219,8 @@ export default function HomePage() {
   const handleIdeasUpdated = useCallback(async () => {
     await loadSidebar();
     if (activeIdeaId) await loadIdeaDetail(activeIdeaId);
-  }, [loadSidebar, loadIdeaDetail, activeIdeaId]);
+    if (tab === "idea") await loadGraph();
+  }, [loadSidebar, loadIdeaDetail, activeIdeaId, tab, loadGraph]);
 
   if (error) {
     return (
@@ -224,8 +250,11 @@ export default function HomePage() {
     <main className="flex h-screen bg-zinc-950 text-zinc-100">
       <div className="hidden w-72 shrink-0 md:block lg:w-80">
         <IdeaSidebar
+          tab={tab}
+          onTabChange={handleTabChange}
           groups={groups}
           sessions={sessions}
+          linkCount={graph.edges.length}
           activeIdeaId={activeIdeaId}
           activeSessionId={sessionId}
           ideaDetail={ideaDetail}
@@ -237,16 +266,20 @@ export default function HomePage() {
         />
       </div>
       <div className="min-w-0 flex-1">
-        <ChatWindow
-          key={`${sessionId}-${activeIdeaId ?? "all"}`}
-          sessionId={sessionId}
-          activeIdeaId={activeIdeaId}
-          ideaTitle={ideaDetail?.title}
-          agents={agents}
-          cursorApiConfigured={cursorApiConfigured}
-          onIdeasUpdated={handleIdeasUpdated}
-          onSessionActivity={() => storeSessionId(sessionId)}
-        />
+        {tab === "idea" ? (
+          <IdeaMap graph={graph} activeIdeaId={activeIdeaId} onSelectIdea={handleSelectIdea} />
+        ) : (
+          <ChatWindow
+            key={`${sessionId}-${activeIdeaId ?? "all"}`}
+            sessionId={sessionId}
+            activeIdeaId={activeIdeaId}
+            ideaTitle={ideaDetail?.title}
+            agents={agents}
+            cursorApiConfigured={cursorApiConfigured}
+            onIdeasUpdated={handleIdeasUpdated}
+            onSessionActivity={() => storeSessionId(sessionId)}
+          />
+        )}
       </div>
     </main>
   );

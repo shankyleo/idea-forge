@@ -9,6 +9,7 @@ import {
   createSessionForIdea,
   getIdea,
   updateSession,
+  getIdeaHonestySnapshot,
 } from "@/lib/db";
 import type { BmadAgentId } from "@/lib/types";
 
@@ -42,7 +43,11 @@ export async function GET(request: Request) {
     const session = getSession(id);
     if (!session) return NextResponse.json({ error: "Not found" }, { status: 404 });
     const messages = getMessages(id);
-    return NextResponse.json({ session, messages });
+    const ideaId =
+      session.activeIdeaId ??
+      [...messages].reverse().find((m) => m.ideaId)?.ideaId;
+    const ideaHonesty = ideaId ? getIdeaHonestySnapshot(ideaId) ?? undefined : undefined;
+    return NextResponse.json({ session, messages, ideaHonesty });
   }
 
   const sessions = listSessionsWithMeta();

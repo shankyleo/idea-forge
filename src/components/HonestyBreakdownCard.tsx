@@ -1,11 +1,14 @@
 "use client";
 
+import { useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import type { HonestyBreakdown } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface HonestyBreakdownCardProps {
   breakdown: HonestyBreakdown;
-  compact?: boolean;
+  variant?: "coach" | "grounding";
+  defaultExpanded?: boolean;
   delta?: number;
 }
 
@@ -21,21 +24,73 @@ function textColor(score: number): string {
   return "text-rose-400";
 }
 
-export function HonestyBreakdownCard({ breakdown, compact, delta }: HonestyBreakdownCardProps) {
+function averageScore(breakdown: HonestyBreakdown): number {
+  if (breakdown.dimensions.length === 0) return 0;
+  return Math.round(
+    breakdown.dimensions.reduce((s, d) => s + d.score, 0) / breakdown.dimensions.length
+  );
+}
+
+function titleForVariant(variant: "coach" | "grounding"): string {
+  return variant === "coach" ? "Honesty Coach breakdown" : "Honesty breakdown";
+}
+
+export function HonestyBreakdownCard({
+  breakdown,
+  variant = "grounding",
+  defaultExpanded = false,
+  delta,
+}: HonestyBreakdownCardProps) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const avg = averageScore(breakdown);
+  const title = titleForVariant(variant);
+
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        className="flex w-full items-center justify-between gap-2 rounded-xl border border-teal-500/25 bg-teal-500/10 px-4 py-2.5 text-left text-sm hover:bg-teal-500/15"
+      >
+        <span className="font-medium text-teal-200">{title}</span>
+        <span className="flex items-center gap-2">
+          <span className={cn("font-semibold tabular-nums", textColor(avg))}>{avg}/100</span>
+          {typeof delta === "number" && delta !== 0 && (
+            <span className={cn("text-xs tabular-nums", delta > 0 ? "text-emerald-400" : "text-rose-400")}>
+              {delta > 0 ? `+${delta}` : delta}
+            </span>
+          )}
+          <ChevronDown className="h-4 w-4 text-teal-300/70" />
+        </span>
+      </button>
+    );
+  }
+
   return (
-    <div className="rounded-lg border border-teal-500/25 bg-teal-500/10 px-3 py-2 text-sm">
-      <p className="font-medium text-teal-200">
-        {compact ? "Idea grounding" : "Honesty Coach breakdown"}
-        {typeof delta === "number" && delta !== 0 && (
-          <span className={cn("ml-2 text-xs", delta > 0 ? "text-emerald-400" : "text-rose-400")}>
-            {delta > 0 ? `+${delta}` : delta} this turn
-          </span>
-        )}
-      </p>
-      {!compact && breakdown.summary && (
+    <div className="w-full rounded-xl border border-teal-500/25 bg-teal-500/10 px-4 py-3 text-sm">
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-medium text-teal-200">
+          {title}
+          <span className={cn("ml-2 tabular-nums", textColor(avg))}>{avg}/100</span>
+          {typeof delta === "number" && delta !== 0 && (
+            <span className={cn("ml-2 text-xs", delta > 0 ? "text-emerald-400" : "text-rose-400")}>
+              {delta > 0 ? `+${delta}` : delta} this turn
+            </span>
+          )}
+        </p>
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="text-teal-300/70 hover:text-teal-200"
+          aria-label="Collapse breakdown"
+        >
+          <ChevronUp className="h-4 w-4" />
+        </button>
+      </div>
+      {variant === "coach" && breakdown.summary && (
         <p className="mt-1 text-xs text-zinc-400">{breakdown.summary}</p>
       )}
-      <div className="mt-2 space-y-2">
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
         {breakdown.dimensions.map((d) => (
           <div key={d.id}>
             <div className="flex items-center justify-between gap-2 text-xs">
@@ -44,21 +99,19 @@ export function HonestyBreakdownCard({ breakdown, compact, delta }: HonestyBreak
                 {d.score}
               </span>
             </div>
-            <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-zinc-800">
+            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-zinc-800">
               <div
                 className={cn("h-full rounded-full transition-all", barColor(d.score))}
                 style={{ width: `${d.score}%` }}
               />
             </div>
-            {!compact && d.note && (
-              <p className="mt-0.5 text-[11px] text-zinc-500">{d.note}</p>
-            )}
+            {d.note && <p className="mt-0.5 text-[11px] text-zinc-500">{d.note}</p>}
           </div>
         ))}
       </div>
       {breakdown.flags.length > 0 && (
-        <ul className="mt-2 space-y-0.5 text-xs text-amber-300/90">
-          {breakdown.flags.map((f) => (
+        <ul className="mt-3 space-y-0.5 text-xs text-amber-300/90">
+          {breakdown.flags.slice(0, 4).map((f) => (
             <li key={f}>• {f}</li>
           ))}
         </ul>

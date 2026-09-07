@@ -550,6 +550,12 @@ export function updateSession(
     );
 }
 
+export function updateMessageHonestyBreakdown(messageId: string, breakdown: HonestyBreakdown) {
+  getDb()
+    .prepare(`UPDATE messages SET honesty_breakdown = ? WHERE id = ?`)
+    .run(JSON.stringify(breakdown), messageId);
+}
+
 export function saveMessage(msg: Omit<ChatMessage, "createdAt"> & { createdAt?: string }) {
   const createdAt = msg.createdAt ?? new Date().toISOString();
   getDb()

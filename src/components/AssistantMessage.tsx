@@ -89,7 +89,7 @@ export function PerspectiveCards({ perspectives }: { perspectives: AgentPerspect
   if (perspectives.length === 0) return null;
 
   return (
-    <div className="mt-4 space-y-2">
+    <div className="space-y-2">
       <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
         Panel perspectives
       </p>
@@ -103,21 +103,18 @@ export function PerspectiveCards({ perspectives }: { perspectives: AgentPerspect
             <div className="mb-2 flex items-start gap-2.5">
               <AgentIcon agentId={p.agentId} className="h-8 w-8 shrink-0" color={p.color} />
               <div className="min-w-0 flex-1">
-                <div className="flex items-baseline justify-between gap-2">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
                   <span className="text-xs font-semibold" style={{ color: p.color }}>
                     {p.name}
                   </span>
-                  <span className="shrink-0 text-[10px] text-zinc-600">{p.role}</span>
-                </div>
-                <div className="mt-1.5">
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={perspectiveMarkdownComponents}
-                  >
-                    {p.content}
-                  </ReactMarkdown>
+                  <span className="text-[10px] text-zinc-600">{p.role}</span>
                 </div>
               </div>
+            </div>
+            <div className="text-xs leading-relaxed text-zinc-400 [&_p]:mb-1.5 [&_p:last-child]:mb-0">
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={perspectiveMarkdownComponents}>
+                {p.content}
+              </ReactMarkdown>
             </div>
           </div>
         ))}

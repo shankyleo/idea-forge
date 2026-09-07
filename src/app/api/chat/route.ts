@@ -9,6 +9,7 @@ import {
   findBestSessionForIdea,
   getCrossChatContext,
   getIdeaHonestySnapshot,
+  updateMessageHonestyBreakdown,
 } from "@/lib/db";
 import { streamAgentResponse } from "@/lib/cursor-agent";
 import { findRelatedIdeas, linkRelatedIdeas } from "@/lib/idea-linker";
@@ -16,13 +17,35 @@ import { runDeepRecon } from "@/lib/web-research";
 import { shouldRunWebResearch, shouldRunPanelResearch, isCasualMessage } from "@/lib/message-utils";
 import { runHonestyBreakdown } from "@/lib/honesty-agent";
 import { routeMessage } from "@/lib/agent-router";
+import { parseSlashCommand, slashRouteReason } from "@/lib/slash-commands";
 import { runPanelPerspectives } from "@/lib/panel-agents";
 import { computeIdeaHonestyUpdate } from "@/lib/idea-honesty";
+import { scoreHonesty } from "@/lib/honesty-scorer";
 import type { DepthScore, HonestyBreakdown, AgentPerspective } from "@/lib/types";
 import type { DeepReconResult } from "@/lib/web-research";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
+
+function honestyContext(
+  depthScore: DepthScore | undefined,
+  reconResult: DeepReconResult | undefined
+) {
+  return {
+    competitionLevel: depthScore?.competitionLevel ?? reconResult?.depth.competitionLevel,
+    depthScore: depthScore?.overall ?? reconResult?.depth.depthScore,
+    hasResearch: Boolean(reconResult),
+  };
+}
+
+function buildHonestyInput(
+  message: string,
+  perspectives: AgentPerspective[],
+  assistantResponse?: string
+): string {
+  const panelText = perspectives.map((p) => `${p.name}: ${p.content}`).join("\n");
+  return [message, panelText, assistantResponse].filter(Boolean).join("\n\n");
+}
 
 export async function POST(request: Request) {
   const body = (await request.json()) as {
@@ -62,15 +85,32 @@ export async function POST(request: Request) {
       (m) => m.role === "user" && !/^(attack|defend) this/i.test(m.content.trim())
     )?.content;
 
-  const route = routeMessage(message, {
-    lastAgentId: lastAssistant?.agentId,
-    messageCount: historyMessages.length,
-  });
+  const slash = parseSlashCommand(message.trim());
+
+  const route = slash
+    ? {
+        agentId: slash.agentId,
+        reason: slashRouteReason(slash.command),
+        matchedAgents: [{ id: slash.agentId, label: `/${slash.command}` }],
+      }
+    : routeMessage(message, {
+        lastAgentId: lastAssistant?.agentId,
+        messageCount: historyMessages.length,
+      });
+
   const agentId = route.agentId;
   updateSession(sessionId, { activeAgentId: agentId });
 
-  const casual = isCasualMessage(message);
-  const extractedIdea = casual ? null : extractAndSaveIdea(message, sessionId);
+  /** Idea/panel/honesty use this; slash-only falls back to the thread topic. */
+  const workingMessage =
+    slash && slash.body
+      ? slash.body
+      : slash
+        ? (topicMessage ?? "Share an idea for the team to work on.")
+        : message;
+
+  const casual = slash ? false : isCasualMessage(message);
+  const extractedIdea = casual ? null : extractAndSaveIdea(workingMessage, sessionId);
   let ideaId = extractedIdea?.id ?? clientIdeaId ?? session.activeIdeaId;
 
   if (extractedIdea && !session.activeIdeaId && !clientIdeaId) {
@@ -84,7 +124,7 @@ export async function POST(request: Request) {
     ideaId = clientIdeaId;
   }
 
-  const related = casual ? [] : findRelatedIdeas(message, ideaId);
+  const related = casual ? [] : findRelatedIdeas(workingMessage, ideaId);
   if (ideaId && related.length > 0) {
     linkRelatedIdeas(ideaId, related);
   }
@@ -154,17 +194,19 @@ export async function POST(request: Request) {
       let depthScore: DepthScore | undefined;
       let reconResult: DeepReconResult | undefined;
       let honestyBreakdown: HonestyBreakdown | undefined;
+      let turnHonesty: HonestyBreakdown | undefined;
       let honestyNarrative: string | undefined;
       let ideaHonestyDelta: number | undefined;
       let perspectives: AgentPerspective[] = [];
 
       try {
         const runResearch =
-          shouldRunWebResearch(agentId, message) || shouldRunPanelResearch(message);
+          shouldRunWebResearch(agentId, workingMessage) ||
+          shouldRunPanelResearch(workingMessage);
 
         if (runResearch && !casual) {
           send({ type: "status", message: "Researching the market for the panel..." });
-          reconResult = await runDeepRecon(message);
+          reconResult = await runDeepRecon(workingMessage);
           researchBlock = reconResult.researchBlock;
           depthScore = {
             overall: reconResult.depth.depthScore,
@@ -182,7 +224,7 @@ export async function POST(request: Request) {
         if (!casual && agentId !== "honesty-coach") {
           send({ type: "status", message: "Panel discussing your idea..." });
           perspectives = await runPanelPerspectives({
-            message: topicMessage ?? message,
+            message: topicMessage ?? workingMessage,
             researchBlock,
             crossChatContext: fullCrossChat || undefined,
             depthScore,
@@ -194,32 +236,43 @@ export async function POST(request: Request) {
 
         if (agentId === "honesty-coach" && !casual) {
           send({ type: "status", message: "Honesty Coach analyzing claims..." });
-          const result = await runHonestyBreakdown(message);
+          const result = await runHonestyBreakdown(workingMessage);
           honestyBreakdown = result.breakdown ?? undefined;
           honestyNarrative = result.narrative;
+        }
+
+        if (!casual) {
+          turnHonesty = scoreHonesty(
+            buildHonestyInput(workingMessage, perspectives),
+            honestyContext(depthScore, reconResult)
+          );
         }
 
         if (ideaId && !casual) {
           const { breakdown, delta } = computeIdeaHonestyUpdate({
             ideaId,
-            userMessage: message,
+            userMessage: workingMessage,
             perspectives,
             competitionLevel: depthScore?.competitionLevel ?? reconResult?.depth.competitionLevel,
             depthScore: depthScore?.overall ?? reconResult?.depth.depthScore,
             hasResearch: Boolean(reconResult),
           });
+          turnHonesty = breakdown;
           ideaHonestyDelta = delta;
           if (agentId === "honesty-coach" && honestyBreakdown) {
             honestyBreakdown = breakdown;
           }
         }
 
+        const userHonestyBreakdown =
+          agentId === "honesty-coach" && honestyBreakdown ? honestyBreakdown : turnHonesty;
+
         saveMessage({
           id: userMsgId,
           sessionId,
           role: "user",
           content: message,
-          honestyBreakdown: agentId === "honesty-coach" ? honestyBreakdown : undefined,
+          honestyBreakdown: userHonestyBreakdown,
           depthScore,
           ideaId,
           relatedIdeas: relatedForClient,
@@ -227,7 +280,7 @@ export async function POST(request: Request) {
 
         send({
           type: "meta",
-          honestyBreakdown: agentId === "honesty-coach" ? honestyBreakdown : undefined,
+          honestyBreakdown: userHonestyBreakdown,
           ideaHonesty: ideaId ? getIdeaHonestySnapshot(ideaId) ?? undefined : undefined,
           ideaHonestyDelta,
           depthScore,
@@ -253,7 +306,7 @@ export async function POST(request: Request) {
         } else {
           for await (const chunk of streamAgentResponse({
             agentId,
-            message,
+            message: workingMessage,
             history: history.slice(0, -1),
             relatedIdeas: relatedForPrompt,
             ideaTitle: extractedIdea?.title ?? ideaTitle,
@@ -261,7 +314,7 @@ export async function POST(request: Request) {
             depthScore,
             recon: reconResult,
             forgeMode,
-            topicMessage: topicMessage ?? message,
+            topicMessage: topicMessage ?? workingMessage,
             crossChatContext: fullCrossChat || undefined,
           })) {
             fullResponse += chunk;
@@ -269,16 +322,28 @@ export async function POST(request: Request) {
           }
         }
 
-        if (ideaId && !casual && fullResponse.trim()) {
-          computeIdeaHonestyUpdate({
-            ideaId,
-            userMessage: message,
-            perspectives,
-            assistantResponse: fullResponse.trim(),
-            competitionLevel: depthScore?.competitionLevel ?? reconResult?.depth.competitionLevel,
-            depthScore: depthScore?.overall ?? reconResult?.depth.depthScore,
-            hasResearch: Boolean(reconResult),
-          });
+        if (!casual && fullResponse.trim()) {
+          if (ideaId) {
+            computeIdeaHonestyUpdate({
+              ideaId,
+              userMessage: workingMessage,
+              perspectives,
+              assistantResponse: fullResponse.trim(),
+              competitionLevel: depthScore?.competitionLevel ?? reconResult?.depth.competitionLevel,
+              depthScore: depthScore?.overall ?? reconResult?.depth.depthScore,
+              hasResearch: Boolean(reconResult),
+            });
+            const finalGrounding = getIdeaHonestySnapshot(ideaId);
+            if (finalGrounding) {
+              updateMessageHonestyBreakdown(userMsgId, finalGrounding);
+            }
+          } else {
+            const finalHonesty = scoreHonesty(
+              buildHonestyInput(workingMessage, perspectives, fullResponse.trim()),
+              honestyContext(depthScore, reconResult)
+            );
+            updateMessageHonestyBreakdown(userMsgId, finalHonesty);
+          }
         }
 
         saveMessage({
@@ -301,6 +366,10 @@ export async function POST(request: Request) {
           showForgeActions: !casual && agentId !== "honesty-coach",
           depthScore,
           ideaHonesty: ideaId ? getIdeaHonestySnapshot(ideaId) ?? undefined : undefined,
+          honestyBreakdown: ideaId
+            ? getIdeaHonestySnapshot(ideaId) ?? userHonestyBreakdown
+            : userHonestyBreakdown,
+          userMessageId: userMsgId,
         });
       } catch (error) {
         send({

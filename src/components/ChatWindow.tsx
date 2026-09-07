@@ -8,6 +8,10 @@ import { DepthBadge } from "@/components/DepthBadge";
 import { RelatedIdeas } from "@/components/IdeaSidebar";
 import { getAgent } from "@/lib/bmad/agents";
 import { AgentIcon } from "@/components/AgentIcon";
+import { isCasualMessage } from "@/lib/message-utils";
+import { scoreHonesty } from "@/lib/honesty-scorer";
+import { SLASH_COMMAND_HINTS, filterSlashCommandOptions, getSlashPickerQuery } from "@/lib/slash-commands";
+import { SlashCommandPicker } from "@/components/SlashCommandPicker";
 import {
   MarkdownContent,
   PerspectiveCards,
@@ -16,6 +20,104 @@ import {
 import type { AgentPerspective } from "@/lib/types";
 
 const CHAT_TIMEOUT_MS = 90_000;
+
+type ChatTurn = { user: ChatMessage; assistant?: ChatMessage };
+
+function groupIntoTurns(messages: ChatMessage[]): ChatTurn[] {
+  const turns: ChatTurn[] = [];
+  let i = 0;
+  while (i < messages.length) {
+    const msg = messages[i];
+    if (msg.role === "user") {
+      const next = messages[i + 1];
+      const assistant = next?.role === "assistant" ? next : undefined;
+      turns.push({ user: msg, assistant });
+      i += assistant ? 2 : 1;
+    } else {
+      turns.push({
+        user: {
+          id: `orphan-${msg.id}`,
+          sessionId: msg.sessionId,
+          role: "user",
+          content: "",
+          createdAt: msg.createdAt,
+        },
+        assistant: msg,
+      });
+      i += 1;
+    }
+  }
+  return turns;
+}
+
+function groundingForTurn(
+  turn: ChatTurn,
+  ideaHonesty: HonestyBreakdown | null,
+  isLastTurn: boolean,
+  livePanel?: AgentPerspective[] | null
+): HonestyBreakdown | undefined {
+  if (turn.user.honestyBreakdown) return turn.user.honestyBreakdown;
+  if (isLastTurn && ideaHonesty) return ideaHonesty;
+  if (!turn.user.content || isCasualMessage(turn.user.content)) return undefined;
+
+  const perspectives = turn.assistant?.perspectives ?? livePanel ?? [];
+  const panelText = perspectives.map((p) => p.content).join("\n");
+  const combined = [turn.user.content, panelText].filter(Boolean).join("\n\n");
+  return scoreHonesty(combined, {
+    hasResearch: Boolean(turn.assistant?.depthScore ?? livePanel?.length),
+    depthScore: turn.assistant?.depthScore?.overall,
+    competitionLevel: turn.assistant?.depthScore?.competitionLevel,
+  });
+}
+
+function AssistantBubble({
+  msg,
+  loading,
+  onSend,
+  onContinueSimilarChat,
+}: {
+  msg: ChatMessage;
+  loading: boolean;
+  onSend: (text: string) => void;
+  onContinueSimilarChat?: (sessionId: string) => void;
+}) {
+  return (
+    <div className="w-full rounded-2xl bg-zinc-800/60 px-4 py-3 ring-1 ring-zinc-700/50">
+      {msg.agentId && (
+        <div className="mb-1 space-y-0.5">
+          <div className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+            <AgentIcon agentId={msg.agentId} className="h-4 w-4" color={getAgent(msg.agentId).color} />
+            {getAgent(msg.agentId).name}
+          </div>
+          {msg.routeReason && <div className="text-[10px] text-zinc-600">{msg.routeReason}</div>}
+        </div>
+      )}
+      <MarkdownContent content={msg.content} />
+      {msg.depthScore && (
+        <div className="mt-3">
+          <DepthBadge score={msg.depthScore} />
+        </div>
+      )}
+      {msg.showForgeActions && (
+        <ForgeActionBar disabled={loading} onAction={onSend} />
+      )}
+      {msg.relatedIdeas && msg.relatedIdeas.length > 0 && (
+        <div className="mt-2">
+          <RelatedIdeas
+            related={msg.relatedIdeas}
+            onContinue={(id) => {
+              void fetch(`/api/sessions?ideaId=${id}`)
+                .then((r) => r.json())
+                .then((d) => {
+                  if (d.session?.id) onContinueSimilarChat?.(d.session.id);
+                });
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface ChatWindowProps {
   sessionId: string;
@@ -54,12 +156,25 @@ export function ChatWindow({
   const [ideaHonesty, setIdeaHonesty] = useState<HonestyBreakdown | null>(null);
   const [ideaHonestyDelta, setIdeaHonestyDelta] = useState<number | undefined>();
   const [panelPerspectives, setPanelPerspectives] = useState<AgentPerspective[]>([]);
+  const [slashPickerIndex, setSlashPickerIndex] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const slashQuery = getSlashPickerQuery(input);
+  const slashOptions = slashQuery !== null ? filterSlashCommandOptions(slashQuery) : [];
+  const slashPickerOpen = slashQuery !== null;
+
+  useEffect(() => {
+    setSlashPickerIndex(0);
+  }, [slashQuery]);
 
   const loadMessages = useCallback(async () => {
     const res = await fetch(`/api/sessions?id=${sessionId}`);
     const data = await res.json();
     setMessages(data.messages ?? []);
+    if (data.ideaHonesty) {
+      setIdeaHonesty(data.ideaHonesty as HonestyBreakdown);
+    }
   }, [sessionId]);
 
   useEffect(() => {
@@ -182,14 +297,17 @@ export function ChatWindow({
             setStreamingPerspectives(p);
           } else if (payload.type === "meta") {
             assistantMsgId = (payload.assistantMessageId as string) ?? "";
+            const userMessageId = (payload.userMessageId as string) ?? optimisticUser.id;
             setStatusLine(null);
             if (!metaApplied) {
+              const grounding = payload.honestyBreakdown as HonestyBreakdown | undefined;
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === optimisticUser.id
                     ? {
                         ...m,
-                        honestyBreakdown: payload.honestyBreakdown as HonestyBreakdown | undefined,
+                        id: userMessageId,
+                        honestyBreakdown: grounding,
                         depthScore: payload.depthScore as DepthScore | undefined,
                         relatedIdeas: payload.relatedIdeas as ChatMessage["relatedIdeas"],
                         ideaId: payload.ideaId as string | undefined,
@@ -202,7 +320,9 @@ export function ChatWindow({
               if (payload.similarIdeaNudge) {
                 setSimilarNudge(payload.similarIdeaNudge as SimilarIdeaNudge);
               }
-              if (payload.ideaHonesty) {
+              if (grounding) {
+                setIdeaHonesty(grounding);
+              } else if (payload.ideaHonesty) {
                 setIdeaHonesty(payload.ideaHonesty as HonestyBreakdown);
               }
               if (typeof payload.ideaHonestyDelta === "number") {
@@ -223,9 +343,19 @@ export function ChatWindow({
             setStreamingContent(assistantContent);
           } else if (payload.type === "done") {
             doneReceived = true;
+            const finalGrounding = payload.honestyBreakdown as HonestyBreakdown | undefined;
+            const doneUserId = payload.userMessageId as string | undefined;
             if (payload.ideaHonesty) {
               setIdeaHonesty(payload.ideaHonesty as HonestyBreakdown);
             }
+            if (finalGrounding && doneUserId) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === doneUserId ? { ...m, honestyBreakdown: finalGrounding } : m
+                )
+              );
+            }
+            setIdeaHonestyDelta(undefined);
             setMessages((prev) => [
               ...prev,
               {
@@ -288,6 +418,47 @@ export function ChatWindow({
   };
 
   const routedAgentInfo = activeRoute ? getAgent(activeRoute.agentId) : null;
+  const turns = groupIntoTurns(messages);
+
+  const selectSlashCommand = useCallback((command: string) => {
+    setInput(`${command} `);
+    setSlashPickerIndex(0);
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      const len = command.length + 1;
+      inputRef.current?.setSelectionRange(len, len);
+    });
+  }, []);
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (slashPickerOpen && slashOptions.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSlashPickerIndex((i) => (i + 1) % slashOptions.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSlashPickerIndex((i) => (i - 1 + slashOptions.length) % slashOptions.length);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        selectSlashCommand(slashOptions[Math.min(slashPickerIndex, slashOptions.length - 1)].label);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setInput("");
+        return;
+      }
+    }
+
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void sendMessage();
+    }
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -320,15 +491,6 @@ export function ChatWindow({
             <span className="text-zinc-500">· {activeRoute.reason}</span>
           </div>
         )}
-        {ideaHonesty && (
-          <div className="mt-2">
-            <HonestyBreakdownCard
-              breakdown={ideaHonesty}
-              compact
-              delta={ideaHonestyDelta}
-            />
-          </div>
-        )}
       </header>
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
@@ -359,6 +521,24 @@ export function ChatWindow({
             <p className="mt-2 text-xs text-zinc-600">
               No agent picker needed. Describe an idea, react to feedback, or ask what&apos;s missing.
             </p>
+            <p className="mt-3 text-xs text-zinc-500">
+              On every substantive message, Forge, Reviewer, Victor, and Maya weigh in as a{" "}
+              <span className="text-zinc-400">panel</span> — then one lead agent writes the full
+              reply. Pick the lead with a slash command:
+            </p>
+            <div className="mt-2 flex flex-wrap justify-center gap-1.5">
+              {SLASH_COMMAND_HINTS.map(({ command, agentId }) => (
+                <button
+                  key={command}
+                  type="button"
+                  onClick={() => selectSlashCommand(command)}
+                  className="rounded-full border border-zinc-700 bg-zinc-900/60 px-2.5 py-1 text-[11px] text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
+                >
+                  {command}
+                  <span className="ml-1 text-zinc-600">→ {getAgent(agentId).name}</span>
+                </button>
+              ))}
+            </div>
             {agents.length > 0 && (
               <div className="mt-8 grid grid-cols-2 gap-2 text-left sm:grid-cols-3">
                 {agents.map((agent) => (
@@ -378,102 +558,91 @@ export function ChatWindow({
           </div>
         )}
 
-        <div className="mx-auto max-w-3xl space-y-4">
-          {messages.map((msg) => (
-              <div key={msg.id} className="space-y-2">
-                <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                  <div
-                    className={`max-w-[85%] rounded-2xl px-4 py-3 ${
-                      msg.role === "user"
-                        ? "bg-indigo-600/20 text-indigo-50 ring-1 ring-indigo-500/20"
-                        : "bg-zinc-800/60 text-zinc-100 ring-1 ring-zinc-700/50"
-                    }`}
-                  >
-                    {msg.role === "assistant" && msg.agentId && (
-                      <div className="mb-1 space-y-0.5">
-                        <div className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
-                          <AgentIcon
-                            agentId={msg.agentId}
-                            className="h-4 w-4"
-                            color={getAgent(msg.agentId).color}
-                          />
-                          {getAgent(msg.agentId).name}
-                        </div>
-                        {msg.routeReason && (
-                          <div className="text-[10px] text-zinc-600">{msg.routeReason}</div>
-                        )}
-                      </div>
-                    )}
-                    {msg.role === "assistant" ? (
-                      <MarkdownContent content={msg.content} />
-                    ) : (
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
-                    )}
-                    {msg.role === "assistant" && msg.depthScore && (
-                      <div className="mt-3">
-                        <DepthBadge score={msg.depthScore} />
-                      </div>
-                    )}
-                    {msg.role === "assistant" && msg.perspectives && msg.perspectives.length > 0 && (
-                      <PerspectiveCards perspectives={msg.perspectives} />
-                    )}
-                    {msg.role === "assistant" && msg.showForgeActions && (
-                      <ForgeActionBar
-                        disabled={loading}
-                        onAction={(t) => void sendMessage(t)}
+        <div className="mx-auto max-w-3xl space-y-8">
+          {turns.map((turn, turnIndex) => {
+            const isLastTurn = turnIndex === turns.length - 1;
+            const isLiveTurn = isLastTurn && loading;
+            const livePerspectives =
+              isLiveTurn && (streamingPerspectives.length > 0 || panelPerspectives.length > 0)
+                ? streamingPerspectives.length > 0
+                  ? streamingPerspectives
+                  : panelPerspectives
+                : null;
+            const grounding = groundingForTurn(
+              turn,
+              ideaHonesty,
+              isLastTurn,
+              livePerspectives
+            );
+            const groundingVariant =
+              turn.assistant?.agentId === "honesty-coach" ? "coach" : "grounding";
+
+            if (!turn.user.content && turn.assistant) {
+              return (
+                <div key={turn.assistant.id}>
+                  <AssistantBubble
+                    msg={turn.assistant}
+                    loading={loading}
+                    onSend={(t) => void sendMessage(t)}
+                    onContinueSimilarChat={onContinueSimilarChat}
+                  />
+                </div>
+              );
+            }
+
+            return (
+              <article key={turn.user.id} className="space-y-3">
+                {turn.user.content && (
+                  <div className="flex justify-end">
+                    <div className="max-w-lg rounded-2xl bg-indigo-600/20 px-4 py-3 text-indigo-50 ring-1 ring-indigo-500/20">
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed">{turn.user.content}</p>
+                    </div>
+                  </div>
+                )}
+
+                {(turn.assistant?.perspectives ?? livePerspectives)?.length ? (
+                  <PerspectiveCards
+                    perspectives={(turn.assistant?.perspectives ?? livePerspectives)!}
+                  />
+                ) : null}
+
+                {grounding && (
+                  <HonestyBreakdownCard
+                    breakdown={grounding}
+                    variant={groundingVariant}
+                    defaultExpanded
+                    delta={isLiveTurn ? ideaHonestyDelta : undefined}
+                  />
+                )}
+
+                {turn.assistant && (
+                  <AssistantBubble
+                    msg={turn.assistant}
+                    loading={loading}
+                    onSend={(t) => void sendMessage(t)}
+                    onContinueSimilarChat={onContinueSimilarChat}
+                  />
+                )}
+
+                {isLiveTurn && streamingContent && streamingAgentId && (
+                  <div className="w-full rounded-2xl bg-zinc-800/60 px-4 py-3 ring-1 ring-zinc-700/50">
+                    <div className="mb-1 inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+                      <AgentIcon
+                        agentId={streamingAgentId}
+                        className="h-4 w-4"
+                        color={getAgent(streamingAgentId).color}
                       />
-                    )}
-                    {msg.role === "user" && msg.honestyBreakdown && (
-                      <div className="mt-3">
-                        <HonestyBreakdownCard breakdown={msg.honestyBreakdown} />
-                      </div>
-                    )}
-                    {msg.relatedIdeas && msg.relatedIdeas.length > 0 && (
-                      <div className="mt-2">
-                        <RelatedIdeas
-                          related={msg.relatedIdeas}
-                          onContinue={(id) => {
-                            void fetch(`/api/sessions?ideaId=${id}`)
-                              .then((r) => r.json())
-                              .then((d) => {
-                                if (d.session?.id) onContinueSimilarChat?.(d.session.id);
-                              });
-                          }}
-                        />
-                      </div>
+                      {getAgent(streamingAgentId).name}
+                    </div>
+                    <MarkdownContent content={streamingContent} />
+                    {streamingForgeActions && (
+                      <ForgeActionBar disabled={loading} onAction={(t) => void sendMessage(t)} />
                     )}
                   </div>
-                </div>
-              </div>
-          ))}
-
-          {panelPerspectives.length > 0 && loading && !streamingContent && (
-            <div className="mx-auto max-w-3xl">
-              <PerspectiveCards perspectives={panelPerspectives} />
-            </div>
-          )}
-
-          {streamingContent && streamingAgentId && (
-            <div className="flex justify-start">
-              <div className="max-w-[85%] rounded-2xl bg-zinc-800/60 px-4 py-3 ring-1 ring-zinc-700/50">
-                <div className="mb-1 inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
-                  <AgentIcon
-                    agentId={streamingAgentId}
-                    className="h-4 w-4"
-                    color={getAgent(streamingAgentId).color}
-                  />
-                  {getAgent(streamingAgentId).name}
-                </div>
-                <MarkdownContent content={streamingContent} />
-                {streamingPerspectives.length > 0 && (
-                  <PerspectiveCards perspectives={streamingPerspectives} />
                 )}
-                {streamingForgeActions && (
-                  <ForgeActionBar disabled={loading} onAction={(t) => void sendMessage(t)} />
-                )}
-              </div>
-            </div>
-          )}
+              </article>
+            );
+          })}
 
           {statusLine && (
             <div className="flex justify-center">
@@ -482,7 +651,7 @@ export function ChatWindow({
           )}
 
           {lastDepth && loading && !statusLine?.includes("searching") && (
-            <div className="mx-auto max-w-md space-y-2">
+            <div className="space-y-2">
               <DepthBadge score={lastDepth} />
               {lastRelated.length > 0 && <RelatedIdeas related={lastRelated} />}
             </div>
@@ -493,29 +662,35 @@ export function ChatWindow({
       </div>
 
       <footer className="border-t border-zinc-800 p-4">
-        <div className="mx-auto flex max-w-3xl gap-2">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-              }
-            }}
-            placeholder="Type anything — a new angle, a thought to validate, pushback, or a question for the team..."
-            rows={2}
-            className="flex-1 resize-none rounded-xl border border-zinc-700 bg-zinc-900/80 px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-indigo-500/50 focus:outline-none focus:ring-1 focus:ring-indigo-500/30"
-            disabled={loading}
-          />
-          <button
-            type="button"
-            onClick={() => void sendMessage()}
-            disabled={loading || !input.trim()}
-            className="flex h-auto items-center justify-center rounded-xl bg-indigo-600 px-4 text-white transition-colors hover:bg-indigo-500 disabled:opacity-40"
-          >
-            <Send className="h-5 w-5" />
-          </button>
+        <div className="relative mx-auto max-w-3xl">
+          {slashPickerOpen && (
+            <SlashCommandPicker
+              options={slashOptions}
+              selectedIndex={slashPickerIndex}
+              onSelect={(option) => selectSlashCommand(option.label)}
+              onHighlight={setSlashPickerIndex}
+            />
+          )}
+          <div className="flex gap-2">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleInputKeyDown}
+              placeholder="Type / to pick an agent, or describe your idea…"
+              rows={2}
+              className="flex-1 resize-none rounded-xl border border-zinc-700 bg-zinc-900/80 px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-indigo-500/50 focus:outline-none focus:ring-1 focus:ring-indigo-500/30"
+              disabled={loading}
+            />
+            <button
+              type="button"
+              onClick={() => void sendMessage()}
+              disabled={loading || !input.trim()}
+              className="flex h-auto items-center justify-center rounded-xl bg-indigo-600 px-4 text-white transition-colors hover:bg-indigo-500 disabled:opacity-40"
+            >
+              <Send className="h-5 w-5" />
+            </button>
+          </div>
         </div>
       </footer>
     </div>

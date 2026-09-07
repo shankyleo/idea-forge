@@ -13,8 +13,6 @@ import { SlashCommandPicker } from "@/components/SlashCommandPicker";
 import { AgentReplyHeader } from "@/components/AgentReplyHeader";
 import { EditableTitle } from "@/components/EditableTitle";
 import { HonestyScoreBadge } from "@/components/HonestyScoreBadge";
-import { HonestyScoreRing } from "@/components/HonestyScoreRing";
-import { cn } from "@/lib/utils";
 import {
   latestVisibleChatHonesty,
   turnHonestyByUserId,
@@ -26,24 +24,6 @@ import {
   ForgeActionBar,
 } from "@/components/AssistantMessage";
 import type { AgentPerspective } from "@/lib/types";
-
-function TurnHonestyPill({ score, delta }: { score: number; delta?: number }) {
-  return (
-    <div className="flex shrink-0 flex-col items-center gap-0.5 self-end pb-1">
-      <HonestyScoreRing score={score} size="sm" />
-      {typeof delta === "number" && delta !== 0 && (
-        <span
-          className={cn(
-            "text-[10px] font-semibold tabular-nums",
-            delta > 0 ? "text-emerald-400" : "text-rose-400"
-          )}
-        >
-          {delta > 0 ? `+${delta}` : delta}
-        </span>
-      )}
-    </div>
-  );
-}
 
 const CHAT_TIMEOUT_MS = 90_000;
 
@@ -682,10 +662,7 @@ export function ChatWindow({
             return (
               <article key={turn.user.id} className="space-y-3">
                 {turn.user.content && (
-                  <div className="flex items-end justify-end gap-2">
-                    {turnHonesty && (
-                      <TurnHonestyPill score={turnHonesty.score} delta={turnDelta} />
-                    )}
+                  <div className="flex justify-end">
                     <div className="max-w-lg rounded-2xl bg-indigo-600/20 px-4 py-3 text-indigo-50 ring-1 ring-indigo-500/20">
                       <p className="whitespace-pre-wrap text-sm leading-relaxed">{turn.user.content}</p>
                     </div>

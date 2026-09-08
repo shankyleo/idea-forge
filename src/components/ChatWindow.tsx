@@ -22,9 +22,11 @@ import {
   MarkdownContent,
   PerspectiveCards,
   ForgeActionBar,
+  BuildThisBar,
 } from "@/components/AssistantMessage";
 import { PromoteAppBar, AttachGithubForm } from "@/components/AppWorkspace";
 import { appKickoffMessage } from "@/lib/app-chat";
+import { isAppBuildIntent } from "@/lib/agent-router";
 import type { AgentPerspective } from "@/lib/types";
 
 const CHAT_TIMEOUT_MS = 300_000;
@@ -69,6 +71,7 @@ function AssistantBubble({
   onPromote,
   onOpenApp,
   previewUrl,
+  showBuildThis,
 }: {
   msg: ChatMessage;
   loading: boolean;
@@ -81,6 +84,7 @@ function AssistantBubble({
   onPromote?: (input: { localPath: string; githubRepo?: string }) => Promise<string | null>;
   onOpenApp?: () => void;
   previewUrl?: string;
+  showBuildThis?: boolean;
 }) {
   return (
     <div className="w-full rounded-2xl bg-zinc-800/60 px-4 py-3 ring-1 ring-zinc-700/50">
@@ -100,6 +104,9 @@ function AssistantBubble({
       )}
       {msg.showForgeActions && (
         <ForgeActionBar disabled={loading} onAction={onSend} />
+      )}
+      {showBuildThis && (
+        <BuildThisBar disabled={loading} onAction={onSend} />
       )}
       {showPromote && onPromote && (
         <PromoteAppBar
@@ -743,12 +750,13 @@ export function ChatWindow({
             {isAppWorkspace ? (
               <>
                 <p className="text-zinc-400">
-                  This chat is dedicated to this app. Winston, John, Sally, and Amelia work in
-                  the folder you picked.
+                  This chat is dedicated to this app. Feedback and questions stay a discussion
+                  with Winston, John, and Sally. Amelia builds when you ask her to — Get started
+                  or Build this.
                 </p>
                 <p className="mt-2 text-xs text-zinc-600">
-                  Type <span className="text-zinc-400">/</span> to pick an agent, or press Get
-                  started once the folder is set.
+                  Type <span className="text-zinc-400">/</span> to pick an agent. Press Get started
+                  once the folder is set if you want Amelia to start the MVP.
                 </p>
                 {app?.localPath && (
                   <button
@@ -826,7 +834,14 @@ export function ChatWindow({
             const slash = turn.user.content
               ? parseSlashCommand(turn.user.content.trim())
               : null;
-            const showPanel = !isAppWorkspace && (!slash || slash.agentId === "party-mode");
+            const showPanel = isAppWorkspace
+              ? !slash && !isAppBuildIntent(turn.user.content)
+              : !slash || slash.agentId === "party-mode";
+            const showBuildThis =
+              isAppWorkspace &&
+              !(isLiveTurn && loading) &&
+              turn.assistant?.agentId !== "developer" &&
+              (turn.assistant?.content.trim().length ?? 0) >= 80;
             const livePerspectives =
               showPanel &&
               isLiveTurn &&
@@ -859,6 +874,7 @@ export function ChatWindow({
                     onPromote={promoteApp}
                     onOpenApp={() => existingApp && onAppPromoted?.(existingApp)}
                     previewUrl={previewUrl}
+                    showBuildThis={showBuildThis}
                   />
                 </div>
               );
@@ -907,6 +923,7 @@ export function ChatWindow({
                     onPromote={promoteApp}
                     onOpenApp={() => existingApp && onAppPromoted?.(existingApp)}
                     previewUrl={previewUrl}
+                    showBuildThis={showBuildThis}
                   />
                 )}
 
@@ -971,7 +988,7 @@ export function ChatWindow({
               onKeyDown={handleInputKeyDown}
               placeholder={
                 isAppWorkspace
-                  ? "Type / for Winston, John, Sally, or Amelia — or describe the next build step…"
+                  ? "Feedback and questions stay a discussion — /amelia or Build this when you want code…"
                   : "Type / to pick an agent, or describe your idea…"
               }
               rows={2}

@@ -17,9 +17,9 @@ import { findRelatedIdeas, linkRelatedIdeas } from "@/lib/idea-linker";
 import { runDeepRecon } from "@/lib/web-research";
 import { shouldRunWebResearch, shouldRunPanelResearch, isCasualMessage, shouldExtractNewIdea } from "@/lib/message-utils";
 import { runHonestyBreakdown } from "@/lib/honesty-agent";
-import { routeMessage, routeAppMessage } from "@/lib/agent-router";
+import { routeMessage, routeAppMessage, isAppBuildIntent } from "@/lib/agent-router";
 import { parseSlashCommand, slashRouteReason, shouldRunTeamPanel, shouldTrackIdeaHonesty, shouldRunSlashAwareResearch } from "@/lib/slash-commands";
-import { runPanelPerspectives } from "@/lib/panel-agents";
+import { runPanelPerspectives, runAppPanelPerspectives } from "@/lib/panel-agents";
 import { computeIdeaHonestyUpdate } from "@/lib/idea-honesty";
 import { scoreHonesty } from "@/lib/honesty-scorer";
 import { getAgent, isAppTeamAgent } from "@/lib/bmad/agents";
@@ -226,7 +226,14 @@ export async function POST(request: Request) {
       let perspectives: AgentPerspective[] = [];
 
       try {
-        const runPanel = !isAppChat && shouldRunTeamPanel(slash, casual);
+        const runAppPanel =
+          isAppChat &&
+          !casual &&
+          !slash &&
+          agentId !== "developer" &&
+          !isAppBuildIntent(message);
+        const runPanel =
+          (!isAppChat && shouldRunTeamPanel(slash, casual)) || runAppPanel;
         const runResearch =
           !isAppChat &&
           shouldRunSlashAwareResearch(
@@ -261,15 +268,25 @@ export async function POST(request: Request) {
         }));
 
         if (runPanel) {
-          send({ type: "status", message: "Panel discussing your idea..." });
-          perspectives = await runPanelPerspectives({
-            message: topicMessage ?? workingMessage,
-            researchBlock,
-            crossChatContext: fullCrossChat || undefined,
-            depthScore,
-            recon: reconResult,
-            history,
+          send({
+            type: "status",
+            message: isAppChat
+              ? "Team discussing your feedback..."
+              : "Panel discussing your idea...",
           });
+          perspectives = isAppChat
+            ? await runAppPanelPerspectives({
+                message: topicMessage ?? workingMessage,
+                history,
+              })
+            : await runPanelPerspectives({
+                message: topicMessage ?? workingMessage,
+                researchBlock,
+                crossChatContext: fullCrossChat || undefined,
+                depthScore,
+                recon: reconResult,
+                history,
+              });
           send({ type: "perspectives", perspectives });
         }
 
@@ -333,7 +350,7 @@ export async function POST(request: Request) {
             topicMessage: topicMessage ?? workingMessage,
             crossChatContext: isAppChat ? undefined : fullCrossChat || undefined,
             workspace: isAppChat ? "app" : "ideas",
-            workspaceCwd: appRecord?.localPath,
+            workspaceCwd: isAppChat && agentId === "developer" ? appRecord?.localPath : undefined,
             localPath: appRecord?.localPath,
             githubRepo: appRecord?.githubRepo,
             onStatus: (message) => send({ type: "status", message }),

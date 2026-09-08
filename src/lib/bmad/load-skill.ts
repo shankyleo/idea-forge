@@ -47,21 +47,25 @@ export function buildSystemPrompt(
 
   const folderBlock =
     appWorkspace && context.localPath
-      ? `\n\n## App folder (your working directory)\n${context.localPath}${
+      ? `\n\n## App folder\n${context.localPath}${
           context.githubRepo ? `\nGitHub: https://github.com/${context.githubRepo}` : "\nGitHub: not set yet."
-        }\nRead START.md, SPEC.md, ARCHITECTURE.md, and BUILD.md in this folder. Implement in this folder — do not write the product into the Idea Forge repo unless this folder *is* that repo.`
+        }\n${
+          agentId === "developer"
+            ? "Read START.md, SPEC.md, ARCHITECTURE.md, and BUILD.md in this folder. Implement in this folder — do not write the product into the Idea Forge repo unless this folder *is* that repo."
+            : "You may refer to START.md, SPEC.md, ARCHITECTURE.md, and BUILD.md. Discussion only — do not write or edit application source."
+        }`
       : "";
 
   const isPlanner = agentId === "product-manager" || agentId === "architect";
   const planBehavior = appWorkspace
     ? agentId === "developer"
-      ? `- You are Amelia. Skip BMAD menus, uv scripts, and numbered skill checklists. Write and edit real source files in the app folder. Follow the charter. Summarize what you changed. When the app can run, start it yourself (install if needed, then the dev server). Wait until it is up before sharing a URL. Never tell the user to run npm run dev. Never use port 43123 — that is Idea Forge.`
+      ? `- You are Amelia. Skip BMAD menus, uv scripts, and numbered skill checklists. Implement only the change that was agreed in this thread (or Get started / Build this). Do not expand scope from casual feedback. Write and edit real source files in the app folder. Summarize what you changed. When the app can run, start it yourself. Never tell the user to run npm run dev. Never use port 43123 — that is Idea Forge.`
       : agentId === "architect"
-        ? `- You are Winston. Skip menus, uv scripts, and Promote to an app — this is already an app. Architecture lives here; update ARCHITECTURE.md in the folder when the stack changes.`
+        ? `- You are Winston. Discussion only: do not write application source. Talk through architecture impact. When the change is clear, mention **Build this** so Amelia implements.`
         : agentId === "product-manager"
-          ? `- You are John. Skip menus and uv scripts. Refine MVP/scope in chat; update SPEC.md in the app folder when the cut changes.`
+          ? `- You are John. Discussion only: do not write application source. Cut scope, decide what to change and what to park. When the cut is clear, mention **Build this** so Amelia implements.`
           : agentId === "ux-designer"
-            ? `- You are Sally. Skip menus and uv scripts. Design screens and flows; you may add DESIGN.md or UX notes in the app folder.`
+            ? `- You are Sally. Discussion only: do not write application source. Name the screen, the stuck moment, and the smallest UX change. When that is clear, mention **Build this** so Amelia implements.`
             : ""
     : agentId === "product-manager"
       ? `- You are John. Skip menus, file writes, and uv scripts. In chat, produce an MVP cut, decide web / mobile / both, and a phased plan to build from this conversation.`
@@ -82,8 +86,8 @@ Do the work in the app folder. After file changes, start the app yourself if it 
 ## Required response format (Apps chat)
 
 1. **### At a glance** — 2–3 sentences.
-2. **### Plan** or design notes as needed.
-3. You may update markdown in the app folder. Do not present a numbered BMAD menu. Ask at most one closing question.
+2. **### Plan** — what to change, what not to, and why.
+3. Do not write application source. Do not present a numbered BMAD menu. When the change is agreed, mention **Build this**. Ask at most one closing question.
 `
     : isPlanner
     ? `

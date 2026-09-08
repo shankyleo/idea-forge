@@ -14,6 +14,12 @@ Read START.md, SPEC.md, ARCHITECTURE.md, and BUILD.md in that folder. Follow tho
 When the app can run, start it yourself (install deps if needed, then start the dev server). Do not tell me to run npm run dev — you start it, wait until it is up, then give me the working URL. Never use port 43123; that is Idea Forge.`;
 }
 
+export function appBuildThisMessage(): string {
+  return `/amelia Build this.
+
+Implement the change the team just agreed in this thread. Follow the latest discussion. Write and edit code in the app folder. Do not expand scope past what was decided.`;
+}
+
 export function rewriteAppPreviewHref(
   href: string | undefined,
   previewUrl?: string

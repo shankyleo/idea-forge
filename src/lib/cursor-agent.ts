@@ -175,7 +175,9 @@ async function* streamWithCursorSdk(
 
   const prompt = `${systemPrompt}${crossBlock}${historyBlock}\n\nUSER: ${options.message}${forgePrefix}\n\nRespond as the active BMAD agent.${
     options.workspace === "app"
-      ? " Work in the app folder. Write and edit files there when the task needs code."
+      ? options.agentId === "developer"
+        ? " Work in the app folder. Write and edit files there when the task needs code."
+        : " Discuss only. Do not write or edit application source. Use the required response format."
       : " Use the required response format."
   }`;
 

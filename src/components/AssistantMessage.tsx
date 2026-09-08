@@ -6,7 +6,7 @@ import type { AgentPerspective } from "@/lib/types";
 import { getAgent } from "@/lib/bmad/agents";
 import { AgentIcon } from "@/components/AgentIcon";
 import { cn } from "@/lib/utils";
-import { rewriteAppPreviewHref } from "@/lib/app-chat";
+import { appBuildThisMessage, rewriteAppPreviewHref } from "@/lib/app-chat";
 
 const markdownComponents = {
   h1: ({ children }: { children?: React.ReactNode }) => (
@@ -193,6 +193,27 @@ export function ForgeActionBar({ onAction, disabled }: ForgeActionBarProps) {
         )}
       >
         What&apos;s missing?
+      </button>
+    </div>
+  );
+}
+
+export function BuildThisBar({ onAction, disabled }: ForgeActionBarProps) {
+  return (
+    <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-700/40 pt-3">
+      <span className="w-full text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+        Ready to implement
+      </span>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onAction(appBuildThisMessage())}
+        className={cn(
+          "rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-1.5 text-xs font-medium text-indigo-200",
+          "hover:bg-indigo-500/20 disabled:opacity-40"
+        )}
+      >
+        Build this
       </button>
     </div>
   );

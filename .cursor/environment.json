@@ -1,6 +1,6 @@
 {
   "name": "Idea Forge",
-  "install": "npm install",
+  "install": "npm install --force",
   "start": "npm run dev:stop || true",
   "terminals": [
     {

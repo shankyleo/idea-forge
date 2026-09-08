@@ -25,12 +25,36 @@ Cloud Agents should open this GitHub repo (not the Cursor tmp repo). Add `GITHUB
 
 ```bash
 npm install
-cp .env.example .env.local
-# Add your CURSOR_API_KEY to .env.local
+# Optional: create .env.local and add CURSOR_API_KEY for live agents
 npm run dev
 ```
 
 Open [http://localhost:43123](http://localhost:43123).
+
+On Apple Silicon, if `npm install` fails on `@next/swc-darwin-x64`, use `npm install --force`.
+
+## Start, stop, restart
+
+The app listens on port **43123**.
+
+| Action | Command | Notes |
+|--------|---------|--------|
+| **Start** | `npm run dev` | Foreground. Also stop with Ctrl+C. |
+| **Stop** | `npm run dev:stop` | Kills the process on port 43123. |
+| **Restart** | `npm run dev:restart` | Stop, then start. Use after editing `.env.local`. |
+
+```bash
+npm run dev          # start
+npm run dev:stop     # stop
+npm run dev:restart  # restart
+```
+
+If you see `EADDRINUSE`, the port is still taken:
+
+```bash
+npm run dev:stop
+npm run dev
+```
 
 ### Git push (GitHub)
 
@@ -46,18 +70,7 @@ npm run push:github
 
 1. Create/open Cloud Agent from **https://github.com/shankyleo/idea-forge**
 2. Environment secrets: `GITHUB_TOKEN`, `CURSOR_API_KEY`
-3. `.cursor/environment.json` installs deps and starts the dev server on port **43123**
-
-
-### Dev server commands
-
-```bash
-npm run dev          # start (foreground — Ctrl+C to stop)
-npm run dev:stop     # stop if port 43123 is already in use
-npm run dev:restart  # stop + start (use after editing .env.local)
-```
-
-If `EADDRINUSE` appears, run `npm run dev:stop` first, then `npm run dev`.
+3. `.cursor/environment.json` installs deps and starts the dev server on port **43123**. Use the same start / stop / restart commands as above.
 
 ## BMAD Integration
 

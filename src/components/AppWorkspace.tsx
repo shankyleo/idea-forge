@@ -160,8 +160,10 @@ export function PromoteAppBar({
 
 export function AttachGithubForm({
   onAttach,
+  className,
 }: {
   onAttach: (githubRepo: string) => Promise<string | null>;
+  className?: string;
 }) {
   const [githubRepo, setGithubRepo] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -169,7 +171,7 @@ export function AttachGithubForm({
 
   return (
     <form
-      className="mt-3 space-y-2 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3"
+      className={cn("mt-3 space-y-2 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3", className)}
       onSubmit={(e) => {
         e.preventDefault();
         setError(null);

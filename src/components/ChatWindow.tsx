@@ -680,6 +680,13 @@ export function ChatWindow({
               >
                 {app.githubRepo}
               </a>
+            ) : isAppWorkspace && app && onAttachGithub ? (
+              <div className="mt-2 max-w-sm">
+                <AttachGithubForm
+                  className="mt-0"
+                  onAttach={(repo) => onAttachGithub(app.id, repo)}
+                />
+              </div>
             ) : isAppWorkspace && app ? (
               <p className="mt-0.5 text-[11px] text-zinc-600">GitHub not set yet</p>
             ) : null}
@@ -800,11 +807,6 @@ export function ChatWindow({
                   >
                     Get started
                   </button>
-                )}
-                {app && !app.githubRepo && onAttachGithub && (
-                  <div className="mx-auto mt-4 max-w-sm text-left">
-                    <AttachGithubForm onAttach={(repo) => onAttachGithub(app.id, repo)} />
-                  </div>
                 )}
                 <p className="mt-3 text-xs text-zinc-500">
                   {getAgent("architect").name}, {getAgent("product-manager").name},{" "}

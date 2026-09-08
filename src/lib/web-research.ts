@@ -1,3 +1,5 @@
+import type { BmadAgentId } from "@/lib/types";
+
 export interface SearchResult {
   title: string;
   snippet: string;
@@ -27,6 +29,33 @@ function extractSearchQueries(idea: string): string[] {
     `${base} startup existing products`,
     `${base} market size problem validation`,
   ].slice(0, 3);
+}
+
+/** Technical stack/API queries for Apps John/Winston — not market TAM. */
+export function extractAppStackQueries(topic: string): string[] {
+  const cleaned = topic.replace(/\s+/g, " ").trim().slice(0, 300);
+  const base = cleaned.split(/[.!?]/)[0]?.trim() ?? cleaned;
+
+  return [
+    `${base} current API documentation 2026`,
+    `${base} discontinued alternative current API`,
+    `${base} current stack official docs 2026`,
+  ].slice(0, 3);
+}
+
+export function shouldRunAppStackRecon(input: {
+  isAppChat: boolean;
+  agentId: BmadAgentId;
+  casual: boolean;
+}): boolean {
+  if (!input.isAppChat || input.casual) return false;
+  return input.agentId === "product-manager" || input.agentId === "architect";
+}
+
+export interface AppStackReconResult {
+  queries: string[];
+  findings: SearchResult[];
+  researchBlock: string;
 }
 
 async function searchDuckDuckGo(query: string): Promise<SearchResult[]> {
@@ -216,4 +245,42 @@ export async function runDeepRecon(idea: string): Promise<DeepReconResult> {
     .join("\n");
 
   return { queries, findings: allFindings, depth, researchBlock };
+}
+
+export async function runAppStackRecon(topic: string): Promise<AppStackReconResult> {
+  const queries = extractAppStackQueries(topic);
+  const allFindings: SearchResult[] = [];
+  const seen = new Set<string>();
+
+  const searchResults = await Promise.all(queries.map((q) => searchDuckDuckGo(q)));
+
+  for (const results of searchResults) {
+    for (const r of results) {
+      const key = r.url || r.title;
+      if (!seen.has(key)) {
+        seen.add(key);
+        allFindings.push(r);
+      }
+    }
+  }
+
+  const researchBlock = [
+    "## Live stack / API research (this run)",
+    "",
+    `Queries: ${queries.map((q) => `"${q}"`).join(", ")}`,
+    "",
+    allFindings.length > 0
+      ? allFindings
+          .slice(0, 8)
+          .map(
+            (f, i) =>
+              `${i + 1}. **${f.title}**\n   ${f.snippet || "(no snippet)"}\n   Source: ${f.url}`
+          )
+          .join("\n\n")
+      : "Evidence was empty — no web results retrieved. Prefer currently available APIs anyway; do not recommend discontinued models.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return { queries, findings: allFindings, researchBlock };
 }

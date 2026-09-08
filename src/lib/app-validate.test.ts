@@ -14,6 +14,17 @@ import {
   validateAppPreview,
   type FetchLike,
 } from "./app-validate";
+import { extractAppStackQueries, runAppStackRecon, shouldRunAppStackRecon } from "./web-research";
+import {
+  ameliaCommitMessage,
+  NODE_GITIGNORE,
+  pushAppBuild,
+  shouldSkipAppGitPush,
+} from "./app-git-push";
+import fs from "fs";
+import os from "os";
+import path from "path";
+import { execFileSync } from "child_process";
 
 type MockPage = {
   status: number;
@@ -355,4 +366,129 @@ test("second-page server-action form that 500s fails", async () => {
   );
   assert.equal(result.passed, false);
   assert.match(result.repro, /500|server-side exception/i);
+});
+
+test("matrix: John/Winston Apps lead runs stack recon; others do not", () => {
+  assert.equal(
+    shouldRunAppStackRecon({ isAppChat: true, agentId: "product-manager", casual: false }),
+    true
+  );
+  assert.equal(
+    shouldRunAppStackRecon({ isAppChat: true, agentId: "architect", casual: false }),
+    true
+  );
+  assert.equal(
+    shouldRunAppStackRecon({ isAppChat: true, agentId: "ux-designer", casual: false }),
+    false
+  );
+  assert.equal(
+    shouldRunAppStackRecon({ isAppChat: true, agentId: "developer", casual: false }),
+    false
+  );
+  assert.equal(
+    shouldRunAppStackRecon({ isAppChat: true, agentId: "validator", casual: false }),
+    false
+  );
+  assert.equal(
+    shouldRunAppStackRecon({ isAppChat: true, agentId: "product-manager", casual: true }),
+    false
+  );
+  assert.equal(
+    shouldRunAppStackRecon({ isAppChat: false, agentId: "product-manager", casual: false }),
+    false
+  );
+  const route = routeAppMessage("The empty state copy is confusing. What should we change?");
+  assert.equal(
+    shouldRunAppStackRecon({ isAppChat: true, agentId: route.agentId, casual: false }),
+    false
+  );
+});
+
+test("matrix: Apps stack queries are technical, not TAM", async () => {
+  const queries = extractAppStackQueries("image generation for the home screen");
+  assert.equal(queries.length, 3);
+  for (const q of queries) {
+    assert.equal(/market size|TAM|competitors 2025/i.test(q), false);
+    assert.match(q, /current API|discontinued|stack official docs/i);
+  }
+
+  const originalFetch = globalThis.fetch;
+  const ddgHtml =
+    `<a class="result__a" href="https://platform.openai.com/docs/images">GPT Image API</a>` +
+    `<a class="result__snippet">Use the current Images API; DALL·E is discontinued.</a>`;
+  globalThis.fetch = (async () => ({
+    ok: true,
+    text: async () => ddgHtml,
+  })) as typeof fetch;
+  try {
+    const recon = await runAppStackRecon("image generation for the home screen");
+    assert.match(recon.researchBlock, /Live stack \/ API research/);
+    assert.match(recon.researchBlock, /GPT Image API/);
+    assert.match(recon.researchBlock, /current Images API/);
+    assert.equal(/Depth assessment|market size|TAM/i.test(recon.researchBlock), false);
+    assert.ok(recon.findings.length > 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("matrix: skip push when githubRepo empty; gitignore before add", () => {
+  assert.equal(shouldSkipAppGitPush(""), true);
+  assert.equal(shouldSkipAppGitPush("   "), true);
+  assert.equal(shouldSkipAppGitPush(undefined), true);
+  assert.equal(shouldSkipAppGitPush("acme/app"), false);
+  const silent = pushAppBuild("/tmp", "", "Amelia: Get started");
+  assert.equal(silent.note, "");
+  assert.equal(silent.pushed, false);
+  assert.match(NODE_GITIGNORE, /node_modules/);
+  assert.match(NODE_GITIGNORE, /\.env/);
+  assert.match(NODE_GITIGNORE, /\.next/);
+  assert.equal(ameliaCommitMessage("Get started"), "Amelia: Get started");
+  assert.match(ameliaCommitMessage("Add a settings page for theme"), /^Amelia: Add a settings page/);
+});
+
+test("matrix: clean tree notes nothing to push; secrets stay untracked", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "idea-forge-push-"));
+  const dir = path.join(root, "app");
+  const bare = path.join(root, "remote.git");
+  const retryDir = path.join(root, "retry");
+  const retryBare = path.join(root, "retry.git");
+  fs.mkdirSync(dir);
+  fs.mkdirSync(retryDir);
+  try {
+    execFileSync("git", ["init", "--bare", bare], { encoding: "utf8" });
+    execFileSync("git", ["init", "--bare", retryBare], { encoding: "utf8" });
+    execFileSync("git", ["init"], { cwd: dir, encoding: "utf8" });
+    execFileSync("git", ["remote", "add", "origin", bare], { cwd: dir, encoding: "utf8" });
+    fs.writeFileSync(path.join(dir, ".gitignore"), "dist/\n");
+    fs.writeFileSync(path.join(dir, ".env"), "SECRET=1\n");
+    fs.writeFileSync(path.join(dir, "app.js"), "console.log('ok');\n");
+    const first = pushAppBuild(dir, "acme/demo", "Amelia: Get started");
+    assert.equal(first.pushed, true);
+    assert.equal(first.note, "Pushed to https://github.com/acme/demo");
+    const gitignore = fs.readFileSync(path.join(dir, ".gitignore"), "utf8");
+    assert.match(gitignore, /dist/);
+    assert.match(gitignore, /node_modules/);
+    assert.match(gitignore, /\.env/);
+    assert.match(gitignore, /\.next/);
+    const lsFiles = execFileSync("git", ["ls-files"], { cwd: dir, encoding: "utf8" });
+    assert.equal(lsFiles.includes(".env"), false);
+    assert.equal(lsFiles.includes("app.js"), true);
+    const clean = pushAppBuild(dir, "acme/demo", "Amelia: Get started");
+    assert.equal(clean.note, "Nothing new to push");
+    assert.equal(clean.pushed, false);
+
+    execFileSync("git", ["init"], { cwd: retryDir, encoding: "utf8" });
+    fs.writeFileSync(path.join(retryDir, "app.js"), "console.log('retry');\n");
+    const missed = pushAppBuild(retryDir, "acme/demo", "Amelia: Get started");
+    assert.equal(missed.pushed, false);
+    assert.match(missed.note, /GitHub push failed/);
+    execFileSync("git", ["remote", "remove", "origin"], { cwd: retryDir, encoding: "utf8" });
+    execFileSync("git", ["remote", "add", "origin", retryBare], { cwd: retryDir, encoding: "utf8" });
+    const retried = pushAppBuild(retryDir, "acme/demo", "Amelia: Get started");
+    assert.equal(retried.pushed, true);
+    assert.equal(retried.note, "Pushed to https://github.com/acme/demo");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

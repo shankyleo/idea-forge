@@ -23,7 +23,8 @@ import {
   type AppValidateResult,
 } from "@/lib/app-validate";
 import { findRelatedIdeas, linkRelatedIdeas } from "@/lib/idea-linker";
-import { runDeepRecon } from "@/lib/web-research";
+import { runAppStackRecon, runDeepRecon, shouldRunAppStackRecon } from "@/lib/web-research";
+import { ameliaCommitMessage, pushAppBuild, shouldSkipAppGitPush } from "@/lib/app-git-push";
 import { shouldRunWebResearch, shouldRunPanelResearch, isCasualMessage, shouldExtractNewIdea } from "@/lib/message-utils";
 import { runHonestyBreakdown } from "@/lib/honesty-agent";
 import { routeMessage, routeAppMessage, isAppBuildIntent } from "@/lib/agent-router";
@@ -258,6 +259,7 @@ export async function POST(request: Request) {
             shouldRunPanelResearch,
             casual
           );
+        const runAppRecon = shouldRunAppStackRecon({ isAppChat, agentId, casual });
 
         if (runResearch) {
           send({
@@ -274,6 +276,13 @@ export async function POST(request: Request) {
             verdict: reconResult.depth.verdict,
             signals: reconResult.depth.signals,
           };
+        } else if (runAppRecon) {
+          send({
+            type: "status",
+            message: "Checking current APIs and stack…",
+          });
+          const stackRecon = await runAppStackRecon(workingMessage);
+          researchBlock = stackRecon.researchBlock;
         }
 
         const history = historyMessages.slice(-10).map((m) => ({
@@ -291,6 +300,7 @@ export async function POST(request: Request) {
           perspectives = isAppChat
             ? await runAppPanelPerspectives({
                 message: topicMessage ?? workingMessage,
+                researchBlock,
                 history,
               })
             : await runPanelPerspectives({
@@ -516,6 +526,25 @@ export async function POST(request: Request) {
           fullResponse = tessText;
           lastSaveId = tessMsgId;
           lastSaveAgent = "validator";
+        }
+
+        if (
+          isAppChat &&
+          appRecord &&
+          agentId === "developer" &&
+          !shouldSkipAppGitPush(appRecord.githubRepo)
+        ) {
+          send({ type: "status", message: "Pushing to GitHub…" });
+          const pushResult = pushAppBuild(
+            appRecord.localPath,
+            appRecord.githubRepo,
+            ameliaCommitMessage(workingMessage)
+          );
+          if (pushResult.note) {
+            const note = `\n\n${pushResult.note}`;
+            fullResponse += note;
+            streamText(note);
+          }
         }
 
         let finalUserHonesty: HonestyBreakdown | undefined;

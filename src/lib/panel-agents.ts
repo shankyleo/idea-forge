@@ -109,6 +109,7 @@ const APP_PANEL_AGENTS: Array<{ id: BmadAgentId; role: string }> = [
 function buildAppPanelPrompt(input: {
   agentId: BmadAgentId;
   message: string;
+  researchBlock?: string;
   history?: Array<{ role: "user" | "assistant"; content: string }>;
 }): string {
   const agent = getAgent(input.agentId);
@@ -126,7 +127,7 @@ The user just shared feedback or a question about the app they are using:
 """
 ${input.message}
 """
-${historyBlock}
+${historyBlock}${input.researchBlock ? `\nCurrent API / stack research:\n${input.researchBlock.slice(0, 2500)}\nPrefer currently available APIs from this evidence. If findings are empty, still advise and note that evidence was empty.\n` : ""}
 
 Your job: give YOUR perspective in 2–4 sentences as ${agent.name}. Discuss — do not write code. Take a stance on what should change (or not), and why. Advise the team; do NOT ask the user questions. No markdown headers.`;
 }
@@ -150,6 +151,7 @@ function fallbackAppPerspective(id: BmadAgentId, role: string): AgentPerspective
 /** Winston, John, and Sally discuss app feedback before Amelia builds. */
 export async function runAppPanelPerspectives(input: {
   message: string;
+  researchBlock?: string;
   history?: Array<{ role: "user" | "assistant"; content: string }>;
 }): Promise<AgentPerspective[]> {
   if (!hasCursorApiKey()) {

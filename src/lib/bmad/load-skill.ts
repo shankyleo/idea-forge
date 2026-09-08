@@ -41,8 +41,11 @@ export function buildSystemPrompt(
     ? `\n\n## Active ${appWorkspace ? "app" : "idea"}\nThe user is working on: "${context.ideaTitle}"`
     : "";
 
+  const isPlanner = agentId === "product-manager" || agentId === "architect";
   const researchBlock = context.researchBlock
-    ? `\n\n## Pre-run web research (use as evidence — cite sources)\n${context.researchBlock}\n\nSynthesize these findings. Give a depth verdict: does this idea have real market depth or is it crowded/vague?`
+    ? appWorkspace && isPlanner
+      ? `\n\n## Pre-run stack research (use as evidence — cite sources)\n${context.researchBlock}\n\nPrefer currently available APIs and models from this evidence. Do not recommend discontinued products when a current alternative is listed. If findings are empty, say the evidence was empty and still answer.`
+      : `\n\n## Pre-run web research (use as evidence — cite sources)\n${context.researchBlock}\n\nSynthesize these findings. Give a depth verdict: does this idea have real market depth or is it crowded/vague?`
     : "";
 
   const folderBlock =
@@ -56,7 +59,6 @@ export function buildSystemPrompt(
         }`
       : "";
 
-  const isPlanner = agentId === "product-manager" || agentId === "architect";
   const planBehavior = appWorkspace
     ? agentId === "developer"
       ? `- You are Amelia. Skip BMAD menus, uv scripts, and numbered skill checklists. Implement only the change that was agreed in this thread (or Get started / Build this). Do not expand scope from casual feedback. Write and edit real source files in the app folder. Summarize what you changed. When the app can run, start it yourself. Never tell the user to run npm run dev. Never use port 43123 — that is Idea Forge.`

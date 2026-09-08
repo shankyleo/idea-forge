@@ -46,4 +46,9 @@
   summary: Prefer the labeled Start CTA when another form appears first on the homepage
   evidence: Pre-existing findPrimaryCta takes the first form with a submit control; not introduced by the cookie/multipart follow.
 
+- source_spec: `/Users/shankhasaha/Documents/github/idea-forge/_bmad-output/implementation-artifacts/spec-apps-github-push-and-research.md`
+  summary: Untrack a .env that Amelia already committed before this gitignore existed
+  evidence: maybe-false medium — gitignore does not remove files already in the index; settle by checking git ls-files for .env in a real app folder after an Amelia turn.
+
+
 

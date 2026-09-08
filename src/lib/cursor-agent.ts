@@ -328,6 +328,8 @@ async function* streamFallbackResponse(
 
     developer: `### At a glance\n\nI'll implement in the app folder: read START.md / SPEC.md / ARCHITECTURE.md / BUILD.md, then write the MVP there.\n\nAdd CURSOR_API_KEY so I can actually edit those files.${relatedNote}${errorNote}`,
 
+    validator: `### At a glance\n\nI'll check the preview over HTTP and report whether the homepage and primary CTA load.${relatedNote}${errorNote}`,
+
     "party-mode": `### At a glance\n\n**${getAgent("forge").name}:** Weakest assumption?\n**${getAgent("deep-recon").name}:** What data validates this?\n**${getAgent("innovation").name}:** Disruption angle?${relatedNote}${errorNote}`,
   };
 

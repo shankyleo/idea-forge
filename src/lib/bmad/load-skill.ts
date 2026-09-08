@@ -66,7 +66,9 @@ export function buildSystemPrompt(
           ? `- You are John. Discussion only: do not write application source. Cut scope, decide what to change and what to park. When the cut is clear, mention **Build this** so Amelia implements.`
           : agentId === "ux-designer"
             ? `- You are Sally. Discussion only: do not write application source. Name the screen, the stuck moment, and the smallest UX change. When that is clear, mention **Build this** so Amelia implements.`
-            : ""
+            : agentId === "validator"
+              ? `- You are Tess. Report only: do not write or edit application source. Validate the running preview (homepage + primary CTA) and report pass or fail with a short repro. Skip BMAD menus.`
+              : ""
     : agentId === "product-manager"
       ? `- You are John. Skip menus, file writes, and uv scripts. In chat, produce an MVP cut, decide web / mobile / both, and a phased plan to build from this conversation.`
       : agentId === "architect"
@@ -80,6 +82,13 @@ export function buildSystemPrompt(
 ## Required response format (Apps chat)
 
 Do the work in the app folder. After file changes, start the app yourself if it can run. Summarize what you wrote. Do not present a numbered BMAD menu. Never tell the user to run npm run dev. Ask at most one closing question.
+`
+      : agentId === "validator"
+        ? `
+
+## Required response format (Apps chat)
+
+Short pass/fail report from the HTTP check. Include a repro if it failed. Do not write application source. Do not present a numbered BMAD menu.
 `
       : `
 

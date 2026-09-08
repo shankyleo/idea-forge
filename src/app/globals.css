@@ -176,6 +176,13 @@ body {
   animation: agent-bounce 2.4s ease-in-out infinite;
 }
 
+.agent-face--tess {
+  animation: agent-nod 3.2s ease-in-out infinite;
+}
+.agent-face--tess .agent-check {
+  animation: agent-sparkle 2s ease-in-out infinite;
+}
+
 .agent-face--party {
   animation: agent-wiggle 1.2s ease-in-out infinite;
 }

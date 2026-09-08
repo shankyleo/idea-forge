@@ -29,6 +29,7 @@ export type BmadAgentId =
   | "architect"
   | "ux-designer"
   | "developer"
+  | "validator"
   | "party-mode";
 
 export interface DepthScore {

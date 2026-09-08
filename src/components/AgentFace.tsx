@@ -17,6 +17,7 @@ const FACE_ANIM: Record<BmadAgentId, string> = {
   architect: "agent-face--winston",
   "ux-designer": "agent-face--sally",
   developer: "agent-face--amelia",
+  validator: "agent-face--tess",
   "party-mode": "agent-face--party",
 };
 
@@ -177,6 +178,16 @@ function Face({ agentId, color }: { agentId: BmadAgentId; color: string }) {
           <path d="M12 20h8" stroke={color} strokeWidth="1.2" strokeLinecap="round" />
           <path d="M9 11 L12 16 L9 21" fill="none" stroke={color} strokeWidth="1.2" strokeLinecap="round" className="agent-chevron" />
           <path d="M23 11 L20 16 L23 21" fill="none" stroke={color} strokeWidth="1.2" strokeLinecap="round" className="agent-chevron" />
+        </>
+      );
+    case "validator":
+      return (
+        <>
+          <circle cx="16" cy="16" r="13" fill="#18181b" stroke={color} strokeWidth="1.5" />
+          <circle cx="11.5" cy="14.5" r="1.2" fill={color} />
+          <circle cx="20.5" cy="14.5" r="1.2" fill={color} />
+          <path d="M11 21 Q16 24 21 21" fill="none" stroke={color} strokeWidth="1.3" strokeLinecap="round" />
+          <path d="M21 8 L23 10 L27 6" fill="none" stroke={color} strokeWidth="1.4" strokeLinecap="round" className="agent-check" />
         </>
       );
     case "party-mode":

@@ -370,7 +370,12 @@ export default function HomePage() {
           <ChatWindow
             key={sessionId}
             sessionId={sessionId}
-            agents={agents.filter((agent) => agent.id !== "ux-designer" && agent.id !== "developer")}
+            agents={agents.filter(
+              (agent) =>
+                agent.id !== "ux-designer" &&
+                agent.id !== "developer" &&
+                agent.id !== "validator"
+            )}
             cursorApiConfigured={cursorApiConfigured}
             onIdeasUpdated={handleIdeasUpdated}
             onSessionActivity={() => storeSessionId(sessionId)}

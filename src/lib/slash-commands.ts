@@ -44,6 +44,9 @@ const SLASH_ALIASES: Record<string, BmadAgentId> = {
   amelia: "developer",
   dev: "developer",
   developer: "developer",
+  tess: "validator",
+  validator: "validator",
+  qa: "validator",
   party: "party-mode",
   "party-mode": "party-mode",
 };
@@ -69,6 +72,7 @@ export const APP_SLASH_HINTS: Array<{ command: string; agentId: BmadAgentId }> =
   { command: "/john", agentId: "product-manager" },
   { command: "/sally", agentId: "ux-designer" },
   { command: "/amelia", agentId: "developer" },
+  { command: "/tess", agentId: "validator" },
 ];
 
 export interface SlashCommandOption {

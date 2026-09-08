@@ -26,3 +26,16 @@
   summary: Avoid removing an existing git origin when attaching GitHub
   evidence: Pre-existing attachGithub behavior from the first promote slice.
 
+- source_spec: `/Users/shankhasaha/Documents/github/idea-forge/_bmad-output/implementation-artifacts/spec-app-validation-agent.md`
+  summary: Automated test of the Apps chat Tess loop (preview, assistant commits, two-fix cap) in POST /api/chat
+  evidence: Helpers are unit-tested; deleting the route loop would still leave those tests green. Closing it needs a mocked POST harness this repo does not have.
+
+- source_spec: `/Users/shankhasaha/Documents/github/idea-forge/_bmad-output/implementation-artifacts/spec-app-validation-agent.md`
+  summary: Component test that SSE type assistant then Tess chunks yield two bubbles, not one fused message
+  evidence: No ChatWindow test runner; spec already lists manual Apps-chat checks for that contract.
+
+- source_spec: `/Users/shankhasaha/Documents/github/idea-forge/_bmad-output/implementation-artifacts/spec-app-validation-agent.md`
+  summary: Restart or wait-for-HTTP when Tess rechecks after an Amelia fix on an already-open preview port
+  evidence: maybe-false medium — ensureAppPreview returns if the port is open; Next HMR may already pick up file changes. Settled by watching whether a failed CTA still fails after Amelia writes files without a process restart.
+
+

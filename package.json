@@ -9,6 +9,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:app-validate": "npx --yes tsx --test src/lib/app-validate.test.ts",
     "prepare": "git config core.hooksPath .githooks 2>/dev/null || true && chmod +x scripts/push-remotes.sh .githooks/post-commit 2>/dev/null || true",
     "push:github": "bash scripts/push-remotes.sh"
   },

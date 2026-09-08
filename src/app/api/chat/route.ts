@@ -13,6 +13,15 @@ import {
   getAppForChatSession,
 } from "@/lib/db";
 import { streamAgentResponse } from "@/lib/cursor-agent";
+import {
+  allowAmeliaFixLoop,
+  canAffordAmeliaFix,
+  dropIdeasTessSlash,
+  formatTessReport,
+  shouldValidateAppTurn,
+  validateAppPreview,
+  type AppValidateResult,
+} from "@/lib/app-validate";
 import { findRelatedIdeas, linkRelatedIdeas } from "@/lib/idea-linker";
 import { runDeepRecon } from "@/lib/web-research";
 import { shouldRunWebResearch, shouldRunPanelResearch, isCasualMessage, shouldExtractNewIdea } from "@/lib/message-utils";
@@ -91,7 +100,11 @@ export async function POST(request: Request) {
   const appRecord = getAppForChatSession(sessionId);
   const isAppChat = Boolean(appRecord);
   const slash =
-    isAppChat && slashRaw && !isAppTeamAgent(slashRaw.agentId) ? null : slashRaw;
+    !slashRaw ||
+    (isAppChat && !isAppTeamAgent(slashRaw.agentId)) ||
+    dropIdeasTessSlash(isAppChat, slashRaw.agentId)
+      ? null
+      : slashRaw;
 
   const route = slash
     ? {
@@ -231,6 +244,7 @@ export async function POST(request: Request) {
           !casual &&
           !slash &&
           agentId !== "developer" &&
+          agentId !== "validator" &&
           !isAppBuildIntent(message);
         const runPanel =
           (!isAppChat && shouldRunTeamPanel(slash, casual)) || runAppPanel;
@@ -332,7 +346,7 @@ export async function POST(request: Request) {
           for (const chunk of chunks) {
             send({ type: "chunk", content: chunk + " " });
           }
-        } else {
+        } else if (agentId !== "validator") {
           send({
             type: "status",
             message: `${getAgent(agentId).name} is working…`,
@@ -360,20 +374,148 @@ export async function POST(request: Request) {
           }
         }
 
-        if (isAppChat && appRecord && agentId === "developer") {
-          send({ type: "status", message: `${getAgent("developer").name} is starting the app…` });
-          const { ensureAppPreview } = await import("@/lib/app-preview");
-          const preview = await ensureAppPreview(appRecord.id);
-          if ("url" in preview) {
-            const note = `\n\n**Open the app:** ${preview.url}\n${getAgent("developer").name} started it — you don't need to run \`npm run dev\`.`;
-            fullResponse += note;
-            send({ type: "chunk", content: note });
-            send({ type: "preview", url: preview.url, port: preview.port });
-          } else {
-            const note = `\n\nCould not start the preview (${preview.error}). ${getAgent("developer").name} should start the app in the folder and share a working URL.`;
-            fullResponse += note;
-            send({ type: "chunk", content: note });
+        const persistAssistant = (
+          id: string,
+          content: string,
+          speaker: typeof agentId,
+          extra?: { perspectives?: AgentPerspective[] }
+        ) => {
+          saveMessage({
+            id,
+            sessionId,
+            role: "assistant",
+            content: content.trim(),
+            agentId: speaker,
+            ideaId,
+            routeReason: speaker === agentId ? route.reason : `${getAgent(speaker).name} responding`,
+            matchedAgents: route.matchedAgents,
+            perspectives: extra?.perspectives ?? [],
+            showForgeActions: !isAppChat && !casual && speaker !== "honesty-coach",
+            depthScore: depthForClient,
+          });
+          send({
+            type: "assistant",
+            id,
+            agentId: speaker,
+            content: content.trim(),
+            routeReason: speaker === agentId ? route.reason : `${getAgent(speaker).name} responding`,
+          });
+        };
+
+        const streamText = (text: string) => {
+          send({ type: "chunk", content: text });
+        };
+
+        const runTessCheck = async (
+          preview: { url: string; port: number } | { error: string }
+        ): Promise<AppValidateResult> => {
+          send({
+            type: "status",
+            message: `${getAgent("validator").name} is checking the app…`,
+            agentId: "validator",
+          });
+          if ("error" in preview) {
+            return {
+              passed: false,
+              repro: `Cannot start the preview (${preview.error}).`,
+            };
           }
+          send({ type: "preview", url: preview.url, port: preview.port });
+          return validateAppPreview(preview.url);
+        };
+
+        let lastSaveId = assistantMsgId;
+        let lastSaveAgent = agentId;
+
+        if (isAppChat && appRecord && shouldValidateAppTurn(isAppChat, agentId)) {
+          send({
+            type: "status",
+            message:
+              agentId === "validator"
+                ? "Starting the app…"
+                : `${getAgent("developer").name} is starting the app…`,
+          });
+          const { ensureAppPreview } = await import("@/lib/app-preview");
+          let preview = await ensureAppPreview(appRecord.id);
+          if (agentId === "developer") {
+            if ("url" in preview) {
+              const note = `\n\n**Open the app:** ${preview.url}\n${getAgent("developer").name} started it — you don't need to run \`npm run dev\`.`;
+              fullResponse += note;
+              send({ type: "chunk", content: note });
+              send({ type: "preview", url: preview.url, port: preview.port });
+            } else {
+              const note = `\n\nCould not start the preview (${preview.error}). ${getAgent("developer").name} should start the app in the folder and share a working URL.`;
+              fullResponse += note;
+              send({ type: "chunk", content: note });
+            }
+            persistAssistant(assistantMsgId, fullResponse, "developer", {
+              perspectives: runPanel ? perspectives : [],
+            });
+            fullResponse = "";
+          }
+
+          const allowFixes = allowAmeliaFixLoop(agentId);
+          const requestStarted = Date.now();
+          let tessResult = await runTessCheck(preview);
+          let tessText = formatTessReport(tessResult);
+          streamText(tessText);
+          let tessMsgId = agentId === "validator" ? assistantMsgId : uuidv4();
+          let fixRound = 0;
+
+          while (
+            allowFixes &&
+            !tessResult.passed &&
+            fixRound < 2 &&
+            canAffordAmeliaFix(280_000 - (Date.now() - requestStarted), fixRound + 1)
+          ) {
+            persistAssistant(tessMsgId, tessText, "validator");
+            fixRound += 1;
+            const fixId = uuidv4();
+            send({
+              type: "status",
+              message: `${getAgent("developer").name} is fixing the break…`,
+              agentId: "developer",
+            });
+            let fixText = "";
+            const fixPrompt = `Fix only this preview validation failure. Do not expand scope.\n\n${tessResult.repro}`;
+            try {
+              for await (const chunk of streamAgentResponse({
+                agentId: "developer",
+                message: fixPrompt,
+                history,
+                relatedIdeas: relatedForPrompt,
+                ideaTitle: appRecord.title,
+                workspace: "app",
+                workspaceCwd: appRecord.localPath,
+                localPath: appRecord.localPath,
+                githubRepo: appRecord.githubRepo,
+                onStatus: (message) => send({ type: "status", message }),
+              })) {
+                fixText += chunk;
+                send({ type: "chunk", content: chunk });
+              }
+            } catch (error) {
+              const note =
+                error instanceof Error ? error.message : "Fix run failed";
+              const fallback = `\n\nFix attempt failed: ${note}`;
+              fixText = (fixText.trim() || "Fix attempt failed.") + fallback;
+              send({ type: "chunk", content: fallback });
+            }
+            persistAssistant(fixId, fixText, "developer");
+            send({ type: "status", message: `${getAgent("developer").name} is starting the app…` });
+            preview = await ensureAppPreview(appRecord.id);
+            tessResult = await runTessCheck(preview);
+            tessText = formatTessReport(tessResult);
+            if (!tessResult.passed && fixRound >= 2) {
+              tessText += `\n\nStopped after 2 fix rounds. Remaining break: ${tessResult.repro}`;
+            }
+            streamText(tessText);
+            tessMsgId = uuidv4();
+          }
+
+          fullResponse = tessText;
+          lastSaveId = tessMsgId;
+          lastSaveAgent = "validator";
         }
 
         let finalUserHonesty: HonestyBreakdown | undefined;
@@ -402,21 +544,23 @@ export async function POST(request: Request) {
         }
 
         saveMessage({
-          id: assistantMsgId,
+          id: lastSaveId,
           sessionId,
           role: "assistant",
           content: fullResponse.trim(),
-          agentId,
+          agentId: lastSaveAgent,
           ideaId,
-          routeReason: route.reason,
+          routeReason: lastSaveAgent === agentId ? route.reason : `${getAgent(lastSaveAgent).name} responding`,
           matchedAgents: route.matchedAgents,
-          perspectives: runPanel ? perspectives : [],
-          showForgeActions: !isAppChat && !casual && agentId !== "honesty-coach",
+          perspectives: runPanel && lastSaveAgent === agentId ? perspectives : [],
+          showForgeActions: !isAppChat && !casual && lastSaveAgent !== "honesty-coach",
           depthScore: depthForClient,
         });
 
         send({
           type: "done",
+          agentId: lastSaveAgent,
+          assistantMessageId: lastSaveId,
           perspectives: runPanel ? perspectives : [],
           showForgeActions: !isAppChat && !casual && agentId !== "honesty-coach",
           depthScore: depthForClient,

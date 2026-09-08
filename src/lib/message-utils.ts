@@ -97,6 +97,13 @@ Example: \`/sally Design the empty state and the first-run path.\``;
 Example: \`/amelia Read START.md and implement the first slice.\``;
   }
 
+  if (agentId === "validator") {
+    const tess = getAgent("validator");
+    return `Hey! I'm **${tess.name}**, ${tess.persona}. I'll check the running preview — homepage and the primary CTA — and report pass or fail. I don't write product code.
+
+Example: \`/tess\``;
+  }
+
   const level = getAgent("honesty-coach");
   return `Hey! I'm ready when you are. Describe an app idea, business concept, or problem you want to think through — try **/honesty** when you want ${level.name} to check your claims.`;
 }

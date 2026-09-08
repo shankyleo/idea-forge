@@ -101,6 +101,14 @@ export const BMAD_AGENTS: AgentInfo[] = [
     color: "#22c55e",
   },
   {
+    id: "validator",
+    name: "Tess",
+    persona: "QA validator",
+    description: "Checks the running preview — homepage and the primary CTA — then reports pass or fail.",
+    skillPath: ".agents/skills/idea-forge-validator/SKILL.md",
+    color: "#38bdf8",
+  },
+  {
     id: "party-mode",
     name: "Party Mode",
     persona: "Multi-agent panel",
@@ -116,12 +124,13 @@ export function getAgent(id: BmadAgentId): AgentInfo {
   return agent;
 }
 
-/** Winston, John, Sally, Amelia — the Apps-tab build team. */
+/** Winston, John, Sally, Amelia, Tess — the Apps-tab build team. */
 export const APP_TEAM_IDS: BmadAgentId[] = [
   "architect",
   "product-manager",
   "ux-designer",
   "developer",
+  "validator",
 ];
 
 export function isAppTeamAgent(id: BmadAgentId): boolean {

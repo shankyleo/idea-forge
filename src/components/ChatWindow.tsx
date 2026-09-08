@@ -433,6 +433,11 @@ export function ChatWindow({
             );
           } else if (payload.type === "status") {
             setStatusLine(payload.message as string);
+            if (payload.agentId) {
+              const nextAgent = payload.agentId as BmadAgentId;
+              routedAgent = nextAgent;
+              setStreamingAgentId(nextAgent);
+            }
           } else if (payload.type === "perspectives") {
             const p = payload.perspectives as AgentPerspective[];
             responsePerspectives = p;
@@ -470,6 +475,26 @@ export function ChatWindow({
               }
               metaApplied = true;
             }
+          } else if (payload.type === "assistant") {
+            const committedId = (payload.id as string) || `a-${Date.now()}`;
+            const committedAgent = (payload.agentId as BmadAgentId) ?? routedAgent ?? undefined;
+            const committedContent = String(payload.content ?? assistantContent).trim();
+            if (committedContent) {
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: committedId,
+                  sessionId,
+                  role: "assistant",
+                  content: committedContent,
+                  agentId: committedAgent,
+                  routeReason: (payload.routeReason as string) || routeReason || undefined,
+                  createdAt: new Date().toISOString(),
+                },
+              ]);
+            }
+            assistantContent = "";
+            setStreamingContent("");
           } else if (payload.type === "chunk") {
             assistantContent += payload.content as string;
             setStreamingContent(assistantContent);
@@ -481,6 +506,12 @@ export function ChatWindow({
             }
           } else if (payload.type === "done") {
             doneReceived = true;
+            if (payload.assistantMessageId) {
+              assistantMsgId = payload.assistantMessageId as string;
+            }
+            if (payload.agentId) {
+              routedAgent = payload.agentId as BmadAgentId;
+            }
             const finalGrounding = payload.honestyBreakdown as HonestyBreakdown | undefined;
             const doneUserId = payload.userMessageId as string | undefined;
             if (finalGrounding && doneUserId) {
@@ -493,21 +524,23 @@ export function ChatWindow({
             if (payload.ideaHonesty) {
               setIdeaHonesty(payload.ideaHonesty as HonestyBreakdown);
             }
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: assistantMsgId || `a-${Date.now()}`,
-                sessionId,
-                role: "assistant",
-                content: assistantContent.trim(),
-                agentId: routedAgent ?? undefined,
-                routeReason: routeReason || undefined,
-                perspectives: responsePerspectives,
-                showForgeActions: responseForgeActions,
-                depthScore: (payload.depthScore as DepthScore) ?? undefined,
-                createdAt: new Date().toISOString(),
-              },
-            ]);
+            if (assistantContent.trim()) {
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: assistantMsgId || `a-${Date.now()}`,
+                  sessionId,
+                  role: "assistant",
+                  content: assistantContent.trim(),
+                  agentId: routedAgent ?? undefined,
+                  routeReason: routeReason || undefined,
+                  perspectives: responsePerspectives,
+                  showForgeActions: responseForgeActions,
+                  depthScore: (payload.depthScore as DepthScore) ?? undefined,
+                  createdAt: new Date().toISOString(),
+                },
+              ]);
+            }
             setStreamingContent("");
             setStreamingAgentId(null);
             setStreamingPerspectives([]);
@@ -752,7 +785,7 @@ export function ChatWindow({
                 <p className="text-zinc-400">
                   This chat is dedicated to this app. Feedback and questions stay a discussion
                   with Winston, John, and Sally. Amelia builds when you ask her to — Get started
-                  or Build this.
+                  or Build this. Tess checks the preview after Amelia.
                 </p>
                 <p className="mt-2 text-xs text-zinc-600">
                   Type <span className="text-zinc-400">/</span> to pick an agent. Press Get started
@@ -775,7 +808,8 @@ export function ChatWindow({
                 )}
                 <p className="mt-3 text-xs text-zinc-500">
                   {getAgent("architect").name}, {getAgent("product-manager").name},{" "}
-                  {getAgent("ux-designer").name}, and {getAgent("developer").name}
+                  {getAgent("ux-designer").name}, {getAgent("developer").name}, and{" "}
+                  {getAgent("validator").name}
                 </p>
               </>
             ) : (
@@ -841,6 +875,7 @@ export function ChatWindow({
               isAppWorkspace &&
               !(isLiveTurn && loading) &&
               turn.assistant?.agentId !== "developer" &&
+              turn.assistant?.agentId !== "validator" &&
               (turn.assistant?.content.trim().length ?? 0) >= 80;
             const livePerspectives =
               showPanel &&

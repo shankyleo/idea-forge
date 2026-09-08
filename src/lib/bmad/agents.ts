@@ -68,6 +68,23 @@ export const BMAD_AGENTS: AgentInfo[] = [
     color: "#10b981",
   },
   {
+    id: "product-manager",
+    name: "John",
+    persona: "Product manager",
+    description:
+      "Turn the discussion into an MVP, platform choice (web, mobile, or both), and a plan to build.",
+    skillPath: ".agents/skills/bmad-agent-pm/SKILL.md",
+    color: "#6366f1",
+  },
+  {
+    id: "architect",
+    name: "Winston",
+    persona: "System architect",
+    description: "Stack, hosting, and a build plan that stays consistent across web and mobile.",
+    skillPath: ".agents/skills/bmad-agent-architect/SKILL.md",
+    color: "#64748b",
+  },
+  {
     id: "party-mode",
     name: "Party Mode",
     persona: "Multi-agent panel",

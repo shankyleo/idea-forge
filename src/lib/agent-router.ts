@@ -89,6 +89,24 @@ const SIGNALS: RouteSignal[] = [
         t
       ),
   },
+  {
+    id: "product-manager",
+    label: "product plan",
+    weight: 3,
+    test: (t) =>
+      /\b(prd|product (?:brief|plan|requirements)|mvp|roadmap|user stor(?:y|ies)|epics?|form.?factor|web or mobile|mobile or web|plan to build)\b/i.test(
+        t
+      ),
+  },
+  {
+    id: "architect",
+    label: "architecture and hosting",
+    weight: 3,
+    test: (t) =>
+      /\b(architect(?:ure)?|tech stack|hosting|deploy(?:ment)?|infra(?:structure)?|how (?:do|should) we (?:host|deploy))\b/i.test(
+        t
+      ),
+  },
 ];
 
 const IDEA_PATTERN =
@@ -189,7 +207,9 @@ export function routeMessage(
     };
   }
 
+  const plannerLead = top.id === "product-manager" || top.id === "architect";
   const multiAgent =
+    !plannerLead &&
     second &&
     top.score >= 2 &&
     second.score >= 2 &&

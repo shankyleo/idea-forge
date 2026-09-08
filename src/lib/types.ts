@@ -25,6 +25,8 @@ export type BmadAgentId =
   | "design-thinking"
   | "innovation"
   | "problem-solving"
+  | "product-manager"
+  | "architect"
   | "party-mode";
 
 export interface DepthScore {

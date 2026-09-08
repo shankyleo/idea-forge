@@ -145,6 +145,22 @@ body {
   animation: agent-thought-float 2s ease-in-out infinite;
 }
 
+.agent-face--john {
+  animation: agent-nod 4s ease-in-out infinite;
+}
+.agent-face--john .agent-clipboard {
+  transform-origin: 16px 16px;
+  animation: agent-tilt 4s ease-in-out infinite;
+}
+
+.agent-face--winston {
+  animation: agent-tilt 3.5s ease-in-out infinite;
+}
+.agent-face--winston .agent-gable {
+  animation: agent-bounce 3s ease-in-out infinite;
+  transform-origin: 16px 14px;
+}
+
 .agent-face--party {
   animation: agent-wiggle 1.2s ease-in-out infinite;
 }

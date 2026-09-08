@@ -41,6 +41,28 @@ export function buildSystemPrompt(
     ? `\n\n## Pre-run web research (use as evidence — cite sources)\n${context.researchBlock}\n\nSynthesize these findings. Give a depth verdict: does this idea have real market depth or is it crowded/vague?`
     : "";
 
+  const isPlanner = agentId === "product-manager" || agentId === "architect";
+  const planBehavior =
+    agentId === "product-manager"
+      ? `- You are John. Skip menus, file writes, and uv scripts. In chat, produce an MVP cut, decide web / mobile / both, and a phased plan to build from this conversation.`
+      : agentId === "architect"
+        ? `- You are Winston. Skip menus, file writes, and uv scripts. In chat, produce stack, platform (web / mobile / both), build approach, and hosting/deploy.`
+        : "";
+  const formatBlock = isPlanner
+    ? `
+
+## Required response format (Idea Forge UI)
+
+1. **### At a glance** — 2–3 sentences.
+2. **### Plan** — ${
+        agentId === "product-manager"
+          ? "MVP cut, web / mobile / both, and phased build steps."
+          : "stack, platform (web / mobile / both), and hosting/deploy."
+      }
+3. Do not write files, run scripts, or present a numbered menu. Ask at most one closing question.
+`
+    : RESPONSE_FORMAT_INSTRUCTION;
+
   return `You are operating as the BMAD agent "${agent.name}" (${agent.persona}) inside Idea Forge, a thinking companion app.
 
 Follow the BMAD skill instructions below. Adapt them for chat (not file-based workflows). Keep responses focused and conversational unless the user wants depth.
@@ -50,8 +72,9 @@ Follow the BMAD skill instructions below. Adapt them for chat (not file-based wo
 - One question at a time when pressure-testing (forge mode)
 - For ${getAgent("deep-recon").name}: include a **Depth verdict** section with competition level and go/no-go guidance
 - Honesty scoring is handled by ${getAgent("honesty-coach").name} only — do not invent honesty scores
+${planBehavior}
 
-${ideaBlock}${relatedBlock}${researchBlock}${RESPONSE_FORMAT_INSTRUCTION}
+${ideaBlock}${relatedBlock}${researchBlock}${formatBlock}
 
 ---
 

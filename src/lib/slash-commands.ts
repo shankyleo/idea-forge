@@ -31,6 +31,13 @@ const SLASH_ALIASES: Record<string, BmadAgentId> = {
   innovation: "innovation",
   quinn: "problem-solving",
   "problem-solving": "problem-solving",
+  john: "product-manager",
+  pm: "product-manager",
+  prd: "product-manager",
+  "product-manager": "product-manager",
+  winston: "architect",
+  architect: "architect",
+  architecture: "architect",
   party: "party-mode",
   "party-mode": "party-mode",
 };
@@ -45,6 +52,8 @@ export const SLASH_COMMAND_HINTS: Array<{ command: string; agentId: BmadAgentId 
   { command: "/victor", agentId: "innovation" },
   { command: "/brainstorm", agentId: "brainstorm" },
   { command: "/quinn", agentId: "problem-solving" },
+  { command: "/john", agentId: "product-manager" },
+  { command: "/winston", agentId: "architect" },
   { command: "/party", agentId: "party-mode" },
 ];
 

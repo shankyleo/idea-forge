@@ -262,6 +262,10 @@ async function* streamFallbackResponse(
 
     "problem-solving": `### At a glance\n\nState the problem as a symptom, then ask "why" five times.${relatedNote}${errorNote}`,
 
+    "product-manager": `### At a glance\n\nMVP first: one job, one user, one surface.\n\n### Plan\n- **MVP:** the smallest loop that proves the idea.\n- **Platform:** web unless the job is on-the-go; add mobile only if capture or notifications are core.\n- **Build:** (1) core loop (2) accounts (3) share or export.\n\nAdd CURSOR_API_KEY for a plan from *this* thread.${relatedNote}${errorNote}`,
+
+    architect: `### At a glance\n\nShip a web app first; wrap native later if the web flow fails on device features.\n\n### Plan\n- **Stack:** one web app, one data store, one file/blob store.\n- **Host:** app host + managed DB + object storage.\n- **Mobile:** PWA first, native only if camera/offline require it.\n\nAdd CURSOR_API_KEY for a plan from *this* thread.${relatedNote}${errorNote}`,
+
     "party-mode": `### At a glance\n\n**${getAgent("forge").name}:** Weakest assumption?\n**${getAgent("deep-recon").name}:** What data validates this?\n**${getAgent("innovation").name}:** Disruption angle?${relatedNote}${errorNote}`,
   };
 

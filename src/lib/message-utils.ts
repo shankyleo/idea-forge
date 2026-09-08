@@ -69,6 +69,20 @@ Share something specific, for example:
 When you share a real idea, I'll run live market research and show a depth score.`;
   }
 
+  if (agentId === "product-manager") {
+    const john = getAgent("product-manager");
+    return `Hey! I'm **${john.name}**, ${john.persona}. Point me at the discussion so far and I'll cut an MVP, pick web / mobile / both, and outline a plan to build.
+
+Example: \`/john Turn this thread into an MVP and say if it should be web, mobile, or both.\``;
+  }
+
+  if (agentId === "architect") {
+    const winston = getAgent("architect");
+    return `Hey! I'm **${winston.name}**, ${winston.persona}. I'll turn the product shape into stack, hosting, and a build plan — including whether this should be web, mobile, or both.
+
+Example: \`/winston Propose stack and hosting for the plan John just outlined.\``;
+  }
+
   const level = getAgent("honesty-coach");
   return `Hey! I'm ready when you are. Describe an app idea, business concept, or problem you want to think through — try **/honesty** when you want ${level.name} to check your claims.`;
 }

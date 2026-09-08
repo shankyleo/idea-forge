@@ -13,6 +13,8 @@ const FACE_ANIM: Record<BmadAgentId, string> = {
   "design-thinking": "agent-face--maya",
   innovation: "agent-face--victor",
   "problem-solving": "agent-face--quinn",
+  "product-manager": "agent-face--john",
+  architect: "agent-face--winston",
   "party-mode": "agent-face--party",
 };
 
@@ -130,6 +132,28 @@ function Face({ agentId, color }: { agentId: BmadAgentId; color: string }) {
           <path d="M13 20 Q16 18 19 20" fill="none" stroke={color} strokeWidth="1.3" strokeLinecap="round" />
           <circle cx="24" cy="10" r="2.5" fill="none" stroke={color} strokeWidth="1" className="agent-thought" />
           <circle cx="26.5" cy="6.5" r="1.5" fill="none" stroke={color} strokeWidth="0.8" className="agent-thought" />
+        </>
+      );
+    case "product-manager":
+      return (
+        <>
+          <circle cx="16" cy="16" r="13" fill="#18181b" stroke={color} strokeWidth="1.5" />
+          <rect x="10" y="8" width="12" height="15" rx="1.5" fill="none" stroke={color} strokeWidth="1.2" className="agent-clipboard" />
+          <path d="M13 8h6" stroke={color} strokeWidth="1.6" strokeLinecap="round" />
+          <circle cx="12.5" cy="14" r="0.9" fill={color} />
+          <circle cx="19.5" cy="14" r="0.9" fill={color} />
+          <path d="M12 18h8 M12 21h5" stroke={color} strokeWidth="1" strokeLinecap="round" />
+        </>
+      );
+    case "architect":
+      return (
+        <>
+          <circle cx="16" cy="16" r="13" fill="#18181b" stroke={color} strokeWidth="1.5" />
+          <path d="M8 18 L16 9 L24 18" fill="none" stroke={color} strokeWidth="1.3" strokeLinejoin="round" className="agent-gable" />
+          <path d="M11 18 V22 H21 V18" fill="none" stroke={color} strokeWidth="1.2" />
+          <circle cx="12" cy="14.5" r="1" fill={color} />
+          <circle cx="20" cy="14.5" r="1" fill={color} />
+          <path d="M13 20h6" stroke={color} strokeWidth="1.2" strokeLinecap="round" />
         </>
       );
     case "party-mode":

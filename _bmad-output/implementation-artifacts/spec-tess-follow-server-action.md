@@ -24,7 +24,7 @@ baseline_commit: '2c5c76161e9c1699ac1507310c1cfe12de29fbd5'
 - Next server-action CTAs (`$ACTION_ID_*` / `$ACTION_REF_*`) are POSTed as `multipart/form-data` with `redirect: "manual"`. Cookies from the homepage GET and the action `Set-Cookie` are sent on the follow GET.
 - Same-page 200 after a server-action POST is a Fail (`server action did not navigate`). 303/302 to a 4xx/5xx/overlay page is a Fail. Report includes the landed URL.
 - Files: `src/lib/app-validate.ts`, `src/lib/app-validate.test.ts`. Chat route / Tess bubble unchanged — they already consume `validateAppPreview`.
-- Live check against the storyboard preview: POST `/` followed to `/project/…/interview` with cookie; Start your story in the browser opens the interview wizard.
+- After the homepage CTA, Tess follows one more POST form on the landed page (interview Generate). Empty `action=""` is the current page, not `/`. Bound action fields decode `&quot;`. Server-side exception copy is an overlay fail.
 
 ## Spec Change Log
 

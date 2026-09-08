@@ -161,6 +161,13 @@ test("4xx homepage or CTA follow fails", async () => {
   assert.match(cta404.repro, /404/);
 });
 
+test("decodes HTML entities in bound Next action fields", () => {
+  const html = `<html><body><form action="" method="post"><input type="hidden" name="$ACTION_1:0" value="{&quot;id&quot;:&quot;abc&quot;}"/><button type="submit">Go</button></form></body></html>`;
+  const cta = findPrimaryCta(html, "http://localhost:43200/project/x/interview");
+  assert.equal(cta?.action, "http://localhost:43200/project/x/interview");
+  assert.equal(decodeURIComponent(cta?.body?.split("=")[1] ?? ""), '{"id":"abc"}');
+});
+
 test("posts hidden form fields with the primary CTA", () => {
   const html = `<html><body><form action="/start" method="post"><input type="hidden" name="$ACTION_ID" value="abc"><button type="submit">Start</button></form></body></html>`;
   const cta = findPrimaryCta(html, "http://localhost:43200/");
@@ -172,6 +179,13 @@ test("detects Next error overlay and finds primary CTA", () => {
   assert.equal(looksLikeErrorPage(HOME_OVERLAY, 200), true);
   assert.equal(looksLikeErrorPage(HOME_OK, 200), false);
   assert.equal(looksLikeErrorPage(INTERVIEW_404, 404), true);
+  assert.equal(
+    looksLikeErrorPage(
+      "Application error: a server-side exception has occurred while loading 127.0.0.1",
+      200
+    ),
+    true
+  );
   const cta = findPrimaryCta(HOME_OK, "http://localhost:43200/");
   assert.deepEqual(cta, { method: "POST", action: "http://localhost:43200/start", body: "" });
 });
@@ -311,4 +325,34 @@ test("forwards homepage Set-Cookie on the server-action POST", async () => {
     })
   );
   assert.equal(result.passed, true);
+});
+
+test("second-page server-action form that 500s fails", async () => {
+  const interview = `<html><body><form action="" encType="multipart/form-data" method="POST"><input type="hidden" name="$ACTION_ID_deadbeef"/><button type="submit">Generate beat sheet</button></form><h1>Story interview</h1></body></html>`;
+  const result = await validateAppPreview(
+    "http://localhost:43200/",
+    mockFetch({
+      "GET http://localhost:43200/": { status: 200, body: NEXT_ACTION_HOME },
+      "POST http://localhost:43200/": {
+        status: 303,
+        body: "",
+        location: "/project/abc/interview",
+        setCookie: "sb_session=abc; Path=/",
+        expectFormData: true,
+      },
+      "GET http://localhost:43200/project/abc/interview": {
+        status: 200,
+        body: interview,
+        requireCookie: "sb_session=abc",
+      },
+      "POST http://localhost:43200/project/abc/interview": {
+        status: 500,
+        body: "Application error: a server-side exception has occurred while loading 127.0.0.1",
+        expectFormData: true,
+        requireCookie: "sb_session=abc",
+      },
+    })
+  );
+  assert.equal(result.passed, false);
+  assert.match(result.repro, /500|server-side exception/i);
 });

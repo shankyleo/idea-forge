@@ -28,6 +28,8 @@ const MAX_REDIRECTS = 5;
 const OVERLAY_MARKERS = [
   "unhandled runtime error",
   "application error: a client-side exception",
+  "application error: a server-side exception",
+  "a server-side exception has occurred",
   "this page isn't working",
   "nextjs-portal",
   "__next_error__",
@@ -35,6 +37,7 @@ const OVERLAY_MARKERS = [
   'name="next-error"',
   "name='next-error'",
 ];
+const EXTRA_FORM_HOPS = 1;
 
 export function looksLikeErrorPage(html: string, status?: number): boolean {
   if (typeof status === "number" && status >= 400) return true;
@@ -54,7 +57,9 @@ export function findPrimaryCta(
     const inner = formMatch[2];
     const submitAttrs = submitControlAttrs(inner);
     if (submitAttrs !== null) {
-      const action = attr(submitAttrs, "formaction") || attr(attrs, "action") || "/";
+      const rawAction =
+        attr(submitAttrs, "formaction") ?? attr(attrs, "action");
+      const action = rawAction === null ? "/" : rawAction;
       const method = (
         attr(submitAttrs, "formmethod") ||
         attr(attrs, "method") ||
@@ -124,9 +129,7 @@ export function canAffordAmeliaFix(remainingMs: number, round: number): boolean 
 
 export function isNextServerActionBody(body?: string): boolean {
   if (!body) return false;
-  return parseFormFields(body).some(
-    ([name]) => name.startsWith("$ACTION_ID") || name.startsWith("$ACTION_REF")
-  );
+  return parseFormFields(body).some(([name]) => name.startsWith("$ACTION"));
 }
 
 export async function validateAppPreview(
@@ -158,37 +161,62 @@ export async function validateAppPreview(
     };
   }
 
-  const next = await fetchPage(fetchImpl, cta.action, cta.method, {
+  const steps: string[] = [];
+  let page = await fetchPage(fetchImpl, cta.action, cta.method, {
     body: cta.body,
     nextAction: isNextServerActionBody(cta.body),
     cookie: home.cookie,
   });
-  if (!next.ok || looksLikeErrorPage(next.body, next.status)) {
-    return {
-      passed: false,
-      homepageStatus: home.status,
-      cta,
-      followedUrl: next.url,
-      repro: `GET ${previewUrl} → ${home.status}; ${cta.method} ${cta.action} → ${next.error ?? `${next.status} error overlay/page`} (${next.url})`,
-    };
+  steps.push(`${cta.method} ${cta.action} → ${page.error ?? page.status}`);
+  const failFollow = (repro: string): AppValidateResult => ({
+    passed: false,
+    homepageStatus: home.status,
+    cta,
+    followedUrl: page.url,
+    repro: `GET ${previewUrl} → ${home.status}; ${repro}`,
+  });
+
+  if (!page.ok || looksLikeErrorPage(page.body, page.status)) {
+    return failFollow(
+      `${steps.join("; ")} ${page.error ?? `${page.status} error overlay/page`} (${page.url})`
+    );
+  }
+  if (isNextServerActionBody(cta.body) && samePath(previewUrl, page.url)) {
+    return failFollow(
+      `${cta.method} ${cta.action} → ${page.status} same page (server action did not navigate)`
+    );
   }
 
-  if (isNextServerActionBody(cta.body) && samePath(previewUrl, next.url)) {
-    return {
-      passed: false,
-      homepageStatus: home.status,
-      cta,
-      followedUrl: next.url,
-      repro: `GET ${previewUrl} → ${home.status}; ${cta.method} ${cta.action} → ${next.status} same page (server action did not navigate)`,
-    };
+  let cookie = page.cookie ?? home.cookie;
+  for (let hop = 0; hop < EXTRA_FORM_HOPS; hop += 1) {
+    const extra = findPrimaryCta(page.body, page.url);
+    if (!extra || extra.method !== "POST") break;
+
+    page = await fetchPage(fetchImpl, extra.action, extra.method, {
+      body: extra.body,
+      nextAction: isNextServerActionBody(extra.body),
+      cookie,
+    });
+    cookie = page.cookie ?? cookie;
+    steps.push(`${extra.method} ${extra.action} → ${page.error ?? page.status}`);
+
+    if (!page.ok || looksLikeErrorPage(page.body, page.status)) {
+      return failFollow(
+        `${steps.join("; ")} ${page.error ?? `${page.status} error overlay/page`} (${page.url})`
+      );
+    }
+    if (isNextServerActionBody(extra.body) && samePath(page.url, extra.action) && extra.method === "POST") {
+      // Bound server actions may re-render the same URL; only fail if the page is an error (above).
+      continue;
+    }
   }
 
   return {
     passed: true,
     homepageStatus: home.status,
     cta,
-    followedUrl: next.url,
-    repro: `GET ${previewUrl} → ${home.status}; ${cta.method} ${cta.action} → ${next.status} ${next.url}`,
+    followedUrl: page.url,
+    repro: `GET ${previewUrl} → ${home.status}; ${steps.join("; ")} ${page.url}`,
   };
 }
 
@@ -244,9 +272,22 @@ function formBody(inner: string): string {
     if (type === "submit" || type === "button" || type === "image") continue;
     const name = attr(tag, "name");
     if (!name) continue;
-    fields.push(`${encodeURIComponent(name)}=${encodeURIComponent(attr(tag, "value") ?? "")}`);
+    fields.push(
+      `${encodeURIComponent(name)}=${encodeURIComponent(decodeEntities(attr(tag, "value") ?? ""))}`
+    );
   }
   return fields.join("&");
+}
+
+function decodeEntities(value: string): string {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
 }
 
 function parseFormFields(body: string): Array<[string, string]> {

@@ -8,21 +8,53 @@ import {
   dropIdeasTessSlash,
   findPrimaryCta,
   formatTessReport,
+  isNextServerActionBody,
   looksLikeErrorPage,
   shouldValidateAppTurn,
   validateAppPreview,
   type FetchLike,
 } from "./app-validate";
 
-function mockFetch(pages: Record<string, { status: number; body: string }>): FetchLike {
+type MockPage = {
+  status: number;
+  body: string;
+  location?: string;
+  setCookie?: string;
+  requireCookie?: string;
+  expectFormData?: boolean;
+};
+
+function mockFetch(pages: Record<string, MockPage>): FetchLike {
   return async (url, init) => {
     const method = (init?.method ?? "GET").toUpperCase();
     const key = `${method} ${url}`;
     const page = pages[key] ?? pages[url];
+    const headers = {
+      get(name: string) {
+        const n = name.toLowerCase();
+        if (n === "location") return page?.location ?? null;
+        if (n === "set-cookie") return page?.setCookie ?? null;
+        return null;
+      },
+    };
     if (!page) {
-      return { status: 404, url, text: async () => "not found" };
+      return { status: 404, url, headers, text: async () => "not found" };
     }
-    return { status: page.status, url, text: async () => page.body };
+    if (page.expectFormData && !(init?.body instanceof FormData)) {
+      return { status: 415, url, headers, text: async () => "expected multipart FormData" };
+    }
+    if (page.requireCookie) {
+      const cookie = init?.headers?.Cookie ?? init?.headers?.cookie ?? "";
+      if (!cookie.includes(page.requireCookie)) {
+        return {
+          status: 404,
+          url,
+          headers,
+          text: async () => `<html><body><meta name="next-error" content="not-found"/><h1>Story not found</h1></body></html>`,
+        };
+      }
+    }
+    return { status: page.status, url, headers, text: async () => page.body };
   };
 }
 
@@ -30,6 +62,9 @@ const HOME_OK = `<html><body><form action="/start" method="post"><button type="s
 const HOME_OVERLAY = `<html><body><nextjs-portal></nextjs-portal><p>Unhandled Runtime Error</p></body></html>`;
 const NEXT_OK = `<html><body><h1>Story</h1></body></html>`;
 const NEXT_500 = `<html><body>server boom</body></html>`;
+const NEXT_ACTION_HOME = `<html><body><form action="" encType="multipart/form-data" method="POST"><input type="hidden" name="$ACTION_ID_000ebe85c565350eefac6ad2595daa8c27c76d5ad7"/><button type="submit">Start your story</button></form></body></html>`;
+const INTERVIEW_OK = `<html><body><h1>Story interview</h1></body></html>`;
+const INTERVIEW_404 = `<html><body><meta name="next-error" content="not-found"/><h1>Story not found</h1></body></html>`;
 
 test("matrix: build pass — homepage + CTA ok", async () => {
   const result = await validateAppPreview(
@@ -136,6 +171,144 @@ test("posts hidden form fields with the primary CTA", () => {
 test("detects Next error overlay and finds primary CTA", () => {
   assert.equal(looksLikeErrorPage(HOME_OVERLAY, 200), true);
   assert.equal(looksLikeErrorPage(HOME_OK, 200), false);
+  assert.equal(looksLikeErrorPage(INTERVIEW_404, 404), true);
   const cta = findPrimaryCta(HOME_OK, "http://localhost:43200/");
   assert.deepEqual(cta, { method: "POST", action: "http://localhost:43200/start", body: "" });
+});
+
+test("Next server-action form that 200s the same homepage fails", async () => {
+  const cta = findPrimaryCta(NEXT_ACTION_HOME, "http://localhost:43200/");
+  assert.equal(cta?.method, "POST");
+  assert.equal(cta?.action, "http://localhost:43200/");
+  assert.equal(isNextServerActionBody(cta?.body), true);
+
+  const result = await validateAppPreview(
+    "http://localhost:43200/",
+    mockFetch({
+      "GET http://localhost:43200/": { status: 200, body: NEXT_ACTION_HOME },
+      "POST http://localhost:43200/": { status: 200, body: NEXT_ACTION_HOME, expectFormData: true },
+    })
+  );
+  assert.equal(result.passed, false);
+  assert.match(result.repro, /did not navigate/i);
+});
+
+test("Next server-action POST + follow to 500 next page fails", async () => {
+  const result = await validateAppPreview(
+    "http://localhost:43200/",
+    mockFetch({
+      "GET http://localhost:43200/": { status: 200, body: NEXT_ACTION_HOME },
+      "POST http://localhost:43200/": {
+        status: 303,
+        body: "",
+        location: "/project/abc/interview",
+        setCookie: "sb_session=abc; Path=/",
+        expectFormData: true,
+      },
+      "GET http://localhost:43200/project/abc/interview": {
+        status: 500,
+        body: NEXT_500,
+        requireCookie: "sb_session=abc",
+      },
+    })
+  );
+  assert.equal(result.passed, false);
+  assert.match(result.repro, /500/);
+});
+
+test("Next server-action POST + follow to 404 next page fails", async () => {
+  const result = await validateAppPreview(
+    "http://localhost:43200/",
+    mockFetch({
+      "GET http://localhost:43200/": { status: 200, body: NEXT_ACTION_HOME },
+      "POST http://localhost:43200/": {
+        status: 303,
+        body: "",
+        location: "/project/abc/interview",
+        setCookie: "sb_session=abc; Path=/",
+        expectFormData: true,
+      },
+      "GET http://localhost:43200/project/abc/interview": {
+        status: 404,
+        body: INTERVIEW_404,
+        requireCookie: "sb_session=abc",
+      },
+    })
+  );
+  assert.equal(result.passed, false);
+  assert.match(result.repro, /404/);
+});
+
+test("Next server-action POST + cookie follow to healthy next page passes", async () => {
+  const result = await validateAppPreview(
+    "http://localhost:43200/",
+    mockFetch({
+      "GET http://localhost:43200/": { status: 200, body: NEXT_ACTION_HOME },
+      "POST http://localhost:43200/": {
+        status: 303,
+        body: "",
+        location: "/project/abc/interview",
+        setCookie: "sb_session=abc; Path=/",
+        expectFormData: true,
+      },
+      "GET http://localhost:43200/project/abc/interview": {
+        status: 200,
+        body: INTERVIEW_OK,
+        requireCookie: "sb_session=abc",
+      },
+    })
+  );
+  assert.equal(result.passed, true);
+  assert.match(formatTessReport(result), /Pass/);
+  assert.match(result.followedUrl ?? "", /\/project\/abc\/interview/);
+});
+
+test("Next server-action follow without sending the session cookie fails", async () => {
+  const result = await validateAppPreview(
+    "http://localhost:43200/",
+    mockFetch({
+      "GET http://localhost:43200/": { status: 200, body: NEXT_ACTION_HOME },
+      "POST http://localhost:43200/": {
+        status: 303,
+        body: "",
+        location: "/project/abc/interview",
+        expectFormData: true,
+        // no setCookie — Tess must not treat a cookieless 404 as a pass
+      },
+      "GET http://localhost:43200/project/abc/interview": {
+        status: 404,
+        body: INTERVIEW_404,
+        requireCookie: "sb_session=abc",
+      },
+    })
+  );
+  assert.equal(result.passed, false);
+  assert.match(result.repro, /404/);
+});
+
+test("forwards homepage Set-Cookie on the server-action POST", async () => {
+  const result = await validateAppPreview(
+    "http://localhost:43200/",
+    mockFetch({
+      "GET http://localhost:43200/": {
+        status: 200,
+        body: NEXT_ACTION_HOME,
+        setCookie: "csrf=home; Path=/",
+      },
+      "POST http://localhost:43200/": {
+        status: 303,
+        body: "",
+        location: "/project/abc/interview",
+        setCookie: "sb_session=abc; Path=/",
+        expectFormData: true,
+        requireCookie: "csrf=home",
+      },
+      "GET http://localhost:43200/project/abc/interview": {
+        status: 200,
+        body: INTERVIEW_OK,
+        requireCookie: "sb_session=abc",
+      },
+    })
+  );
+  assert.equal(result.passed, true);
 });

@@ -38,4 +38,12 @@
   summary: Restart or wait-for-HTTP when Tess rechecks after an Amelia fix on an already-open preview port
   evidence: maybe-false medium — ensureAppPreview returns if the port is open; Next HMR may already pick up file changes. Settled by watching whether a failed CTA still fails after Amelia writes files without a process restart.
 
+- source_spec: `/Users/shankhasaha/Documents/github/idea-forge/_bmad-output/implementation-artifacts/spec-tess-follow-server-action.md`
+  summary: Follow 307/308 redirects with the original POST body instead of always GETting Location
+  evidence: Storyboard Start uses 303 See Other. 307/308 POST-preserving hops are unimplemented and untested.
+
+- source_spec: `/Users/shankhasaha/Documents/github/idea-forge/_bmad-output/implementation-artifacts/spec-tess-follow-server-action.md`
+  summary: Prefer the labeled Start CTA when another form appears first on the homepage
+  evidence: Pre-existing findPrimaryCta takes the first form with a submit control; not introduced by the cookie/multipart follow.
+
 

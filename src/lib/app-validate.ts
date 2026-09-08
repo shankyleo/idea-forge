@@ -3,6 +3,7 @@ export type AppValidateResult = {
   repro: string;
   homepageStatus?: number;
   cta?: { method: string; action: string; body?: string };
+  followedUrl?: string;
 };
 
 export type FetchLike = (
@@ -11,16 +12,18 @@ export type FetchLike = (
     method?: string;
     redirect?: RequestRedirect;
     headers?: Record<string, string>;
-    body?: string;
+    body?: string | FormData;
     signal?: AbortSignal;
   }
 ) => Promise<{
   status: number;
   url: string;
+  headers?: { get(name: string): string | null; getSetCookie?: () => string[] };
   text: () => Promise<string>;
 }>;
 
 const FETCH_TIMEOUT_MS = 10_000;
+const MAX_REDIRECTS = 5;
 
 const OVERLAY_MARKERS = [
   "unhandled runtime error",
@@ -29,10 +32,12 @@ const OVERLAY_MARKERS = [
   "nextjs-portal",
   "__next_error__",
   "a server/client exception",
+  'name="next-error"',
+  "name='next-error'",
 ];
 
 export function looksLikeErrorPage(html: string, status?: number): boolean {
-  if (typeof status === "number" && status >= 500) return true;
+  if (typeof status === "number" && status >= 400) return true;
   const lower = html.toLowerCase();
   return OVERLAY_MARKERS.some((marker) => lower.includes(marker));
 }
@@ -89,8 +94,9 @@ export function findPrimaryCta(
 
 export function formatTessReport(result: AppValidateResult): string {
   if (result.passed) {
+    const landed = result.followedUrl ? ` → ${result.followedUrl}` : "";
     const cta = result.cta
-      ? ` Followed **${result.cta.method} ${result.cta.action}**.`
+      ? ` Followed **${result.cta.method} ${result.cta.action}**${landed}.`
       : "";
     return `**Pass** — Homepage loaded (${result.homepageStatus ?? 200}).${cta} Preview is healthy.`;
   }
@@ -114,6 +120,13 @@ export function canAffordAmeliaFix(remainingMs: number, round: number): boolean 
   if (remainingMs < 20_000) return false;
   if (round === 1) return remainingMs >= 90_000;
   return remainingMs >= 180_000;
+}
+
+export function isNextServerActionBody(body?: string): boolean {
+  if (!body) return false;
+  return parseFormFields(body).some(
+    ([name]) => name.startsWith("$ACTION_ID") || name.startsWith("$ACTION_REF")
+  );
 }
 
 export async function validateAppPreview(
@@ -145,13 +158,28 @@ export async function validateAppPreview(
     };
   }
 
-  const next = await fetchPage(fetchImpl, cta.action, cta.method, cta.body);
+  const next = await fetchPage(fetchImpl, cta.action, cta.method, {
+    body: cta.body,
+    nextAction: isNextServerActionBody(cta.body),
+    cookie: home.cookie,
+  });
   if (!next.ok || looksLikeErrorPage(next.body, next.status)) {
     return {
       passed: false,
       homepageStatus: home.status,
       cta,
-      repro: `GET ${previewUrl} → ${home.status}; ${cta.method} ${cta.action} → ${next.error ?? `${next.status} error overlay/page`}`,
+      followedUrl: next.url,
+      repro: `GET ${previewUrl} → ${home.status}; ${cta.method} ${cta.action} → ${next.error ?? `${next.status} error overlay/page`} (${next.url})`,
+    };
+  }
+
+  if (isNextServerActionBody(cta.body) && samePath(previewUrl, next.url)) {
+    return {
+      passed: false,
+      homepageStatus: home.status,
+      cta,
+      followedUrl: next.url,
+      repro: `GET ${previewUrl} → ${home.status}; ${cta.method} ${cta.action} → ${next.status} same page (server action did not navigate)`,
     };
   }
 
@@ -159,7 +187,8 @@ export async function validateAppPreview(
     passed: true,
     homepageStatus: home.status,
     cta,
-    repro: `GET ${previewUrl} → ${home.status}; ${cta.method} ${cta.action} → ${next.status}`,
+    followedUrl: next.url,
+    repro: `GET ${previewUrl} → ${home.status}; ${cta.method} ${cta.action} → ${next.status} ${next.url}`,
   };
 }
 
@@ -181,6 +210,16 @@ function sameOrigin(base: string, url: string): boolean {
     return new URL(url).origin === new URL(base).origin;
   } catch {
     return false;
+  }
+}
+
+function samePath(a: string, b: string): boolean {
+  try {
+    const pa = new URL(a).pathname.replace(/\/+$/, "") || "/";
+    const pb = new URL(b).pathname.replace(/\/+$/, "") || "/";
+    return pa === pb;
+  } catch {
+    return a === b;
   }
 }
 
@@ -210,24 +249,98 @@ function formBody(inner: string): string {
   return fields.join("&");
 }
 
+function parseFormFields(body: string): Array<[string, string]> {
+  if (!body) return [];
+  return body.split("&").filter(Boolean).map((pair) => {
+    const eq = pair.indexOf("=");
+    const rawName = eq === -1 ? pair : pair.slice(0, eq);
+    const rawValue = eq === -1 ? "" : pair.slice(eq + 1);
+    return [decodeComponent(rawName), decodeComponent(rawValue)];
+  });
+}
+
+function decodeComponent(value: string): string {
+  try {
+    return decodeURIComponent(value.replace(/\+/g, " "));
+  } catch {
+    return value.replace(/\+/g, " ");
+  }
+}
+
+function readSetCookies(headers?: {
+  get(name: string): string | null;
+  getSetCookie?: () => string[];
+}): string[] {
+  if (!headers) return [];
+  if (typeof headers.getSetCookie === "function") {
+    return headers.getSetCookie().map((cookie) => cookie.split(";")[0]?.trim() ?? "").filter(Boolean);
+  }
+  const raw = headers.get("set-cookie");
+  if (!raw) return [];
+  return [raw.split(";")[0]?.trim()].filter(Boolean);
+}
+
+function mergeCookies(existing: string | undefined, setCookies: string[]): string | undefined {
+  const map = new Map<string, string>();
+  if (existing) {
+    for (const part of existing.split(";")) {
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+      const eq = trimmed.indexOf("=");
+      const name = eq === -1 ? trimmed : trimmed.slice(0, eq);
+      const value = eq === -1 ? "" : trimmed.slice(eq + 1);
+      map.set(name, value);
+    }
+  }
+  for (const pair of setCookies) {
+    const eq = pair.indexOf("=");
+    const name = (eq === -1 ? pair : pair.slice(0, eq)).trim();
+    const value = eq === -1 ? "" : pair.slice(eq + 1);
+    if (name) map.set(name, value);
+  }
+  if (map.size === 0) return undefined;
+  return [...map.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
+}
+
+type FetchPageOptions = {
+  body?: string;
+  nextAction?: boolean;
+  cookie?: string;
+  hops?: number;
+};
+
 async function fetchPage(
   fetchImpl: FetchLike,
   url: string,
   method: string,
-  body?: string
-): Promise<{ ok: boolean; status: number; body: string; error?: string }> {
+  options: FetchPageOptions = {}
+): Promise<{ ok: boolean; status: number; body: string; url: string; error?: string; cookie?: string }> {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const hops = options.hops ?? 0;
   try {
     const headers: Record<string, string> = { Accept: "text/html,application/xhtml+xml" };
+    if (options.cookie) headers.Cookie = options.cookie;
+
+    let body: string | FormData | undefined;
     if (method === "POST") {
-      headers["Content-Type"] = "application/x-www-form-urlencoded";
+      if (options.nextAction) {
+        const formData = new FormData();
+        for (const [name, value] of parseFormFields(options.body ?? "")) {
+          formData.append(name, value);
+        }
+        body = formData;
+      } else {
+        headers["Content-Type"] = "application/x-www-form-urlencoded";
+        body = options.body ?? "";
+      }
     }
+
     const pending = fetchImpl(url, {
       method,
-      redirect: "follow",
+      redirect: "manual",
       headers,
-      body: method === "POST" ? (body ?? "") : undefined,
+      body,
       signal: controller.signal,
     });
     void pending.catch(() => {});
@@ -239,10 +352,27 @@ async function fetchPage(
     });
     const res = await Promise.race([pending, timedOut]);
     const html = await res.text();
-    if (res.status >= 400) {
-      return { ok: false, status: res.status, body: html, error: `${res.status}` };
+    const cookie = mergeCookies(options.cookie, readSetCookies(res.headers));
+
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers?.get("location");
+      if (!location) {
+        return { ok: false, status: res.status, body: html, url, cookie, error: `${res.status} redirect with no Location` };
+      }
+      const nextUrl = resolveUrl(url, location);
+      if (!sameOrigin(url, nextUrl)) {
+        return { ok: false, status: res.status, body: html, url, cookie, error: `${res.status} redirected off-origin` };
+      }
+      if (hops >= MAX_REDIRECTS) {
+        return { ok: false, status: res.status, body: html, url, cookie, error: `too many redirects` };
+      }
+      return fetchPage(fetchImpl, nextUrl, "GET", { cookie, hops: hops + 1 });
     }
-    return { ok: true, status: res.status, body: html };
+
+    if (res.status >= 400) {
+      return { ok: false, status: res.status, body: html, url: res.url || url, cookie, error: `${res.status}` };
+    }
+    return { ok: true, status: res.status, body: html, url: res.url || url, cookie };
   } catch (error) {
     const message = error instanceof Error ? error.message : "request failed";
     const timedOut =
@@ -252,6 +382,7 @@ async function fetchPage(
       ok: false,
       status: 0,
       body: "",
+      url,
       error: timedOut ? "timed out after 10s" : message,
     };
   } finally {

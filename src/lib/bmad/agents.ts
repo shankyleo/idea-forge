@@ -80,9 +80,25 @@ export const BMAD_AGENTS: AgentInfo[] = [
     id: "architect",
     name: "Winston",
     persona: "System architect",
-    description: "Stack, hosting, and a build plan that stays consistent across web and mobile.",
+    description: "Stack, hosting, and promote a plan into an app. Folder now, GitHub when you have it.",
     skillPath: ".agents/skills/bmad-agent-architect/SKILL.md",
     color: "#64748b",
+  },
+  {
+    id: "ux-designer",
+    name: "Sally",
+    persona: "UX designer",
+    description: "Screens, flows, and interaction design for the app you are building.",
+    skillPath: ".agents/skills/bmad-agent-ux-designer/SKILL.md",
+    color: "#f472b6",
+  },
+  {
+    id: "developer",
+    name: "Amelia",
+    persona: "Senior software engineer",
+    description: "Write and edit the app in its folder — tests, implementation, and verification.",
+    skillPath: ".agents/skills/bmad-agent-dev/SKILL.md",
+    color: "#22c55e",
   },
   {
     id: "party-mode",
@@ -98,4 +114,16 @@ export function getAgent(id: BmadAgentId): AgentInfo {
   const agent = BMAD_AGENTS.find((a) => a.id === id);
   if (!agent) throw new Error(`Unknown agent: ${id}`);
   return agent;
+}
+
+/** Winston, John, Sally, Amelia — the Apps-tab build team. */
+export const APP_TEAM_IDS: BmadAgentId[] = [
+  "architect",
+  "product-manager",
+  "ux-designer",
+  "developer",
+];
+
+export function isAppTeamAgent(id: BmadAgentId): boolean {
+  return (APP_TEAM_IDS as readonly string[]).includes(id);
 }

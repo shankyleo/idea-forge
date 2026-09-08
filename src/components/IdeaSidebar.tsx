@@ -1,22 +1,20 @@
 "use client";
 
 import {
-  History,
+  AppWindow,
   Lightbulb,
   Link2,
   MessagesSquare,
   MessageSquarePlus,
-  Network,
   PanelLeft,
   PanelLeftClose,
   Pin,
 } from "lucide-react";
-import type { ChatSession, IdeaGroup, IdeaRecord } from "@/lib/types";
+import type { AppRecord, IdeaGroup, IdeaRecord } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { EditableTitle } from "@/components/EditableTitle";
 import { normalizeConversationTitle } from "@/lib/session-titles";
 
-export type SidebarTab = "chat" | "idea" | "history";
+export type SidebarTab = "chat" | "app";
 
 const LAST_SESSION_KEY = "idea-forge:lastSessionId";
 
@@ -33,19 +31,14 @@ interface IdeaSidebarProps {
   tab: SidebarTab;
   onTabChange: (tab: SidebarTab) => void;
   groups: IdeaGroup[];
-  sessions: ChatSession[];
-  linkCount?: number;
   activeIdeaId?: string;
-  activeSessionId?: string;
-  ideaDetail?: IdeaRecord | null;
-  relatedIdeas?: Array<IdeaRecord & { linkReason: string; score: number }>;
   onSelectIdea: (ideaId: string) => void;
-  onSelectSession: (sessionId: string) => void;
   onNewSession: () => void;
-  onClearIdea: () => void;
-  onRenameSession?: (sessionId: string, title: string) => void | Promise<void>;
   onTogglePinIdea?: (ideaId: string, pinned: boolean) => void | Promise<void>;
   onCloseMobile?: () => void;
+  apps?: AppRecord[];
+  activeAppId?: string;
+  onSelectApp?: (appId: string) => void;
 }
 
 export function NavToggleButton({
@@ -65,7 +58,7 @@ export function NavToggleButton({
         "mt-0.5 shrink-0 rounded-lg p-2 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100",
         !visibleOnDesktop && "md:hidden"
       )}
-      aria-label="Open conversations"
+      aria-label="Open sidebar"
       aria-expanded={open}
       aria-controls="app-nav"
     >
@@ -74,33 +67,18 @@ export function NavToggleButton({
   );
 }
 
-function formatWhen(iso: string) {
-  const d = new Date(iso);
-  const now = new Date();
-  const sameDay = d.toDateString() === now.toDateString();
-  if (sameDay) {
-    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  }
-  return d.toLocaleDateString([], { month: "short", day: "numeric" });
-}
-
 export function IdeaSidebar({
   tab,
   onTabChange,
   groups,
-  sessions,
-  linkCount = 0,
   activeIdeaId,
-  activeSessionId,
-  ideaDetail,
-  relatedIdeas = [],
   onSelectIdea,
-  onSelectSession,
   onNewSession,
-  onClearIdea,
-  onRenameSession,
   onTogglePinIdea,
   onCloseMobile,
+  apps = [],
+  activeAppId,
+  onSelectApp,
 }: IdeaSidebarProps) {
   const totalIdeas = groups.reduce((n, g) => n + g.ideas.length, 0);
   const allIdeas = groups.flatMap((g) => g.ideas);
@@ -162,72 +140,25 @@ export function IdeaSidebar({
     </li>
   );
 
-  const renderSession = (session: ChatSession) => {
-    const label = session.displayTitle ?? session.title;
-
-    return (
-      <li key={session.id}>
-        <div
-          role="button"
-          tabIndex={0}
-          onClick={() => onSelectSession(session.id)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              onSelectSession(session.id);
-            }
-          }}
-          className={cn(
-            "rounded-lg px-3 py-2.5 transition-colors cursor-pointer",
-            activeSessionId === session.id
-              ? "bg-indigo-600/15 ring-1 ring-indigo-500/30"
-              : "hover:bg-zinc-800/60"
-          )}
-        >
-          <div className="flex items-start gap-2">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-2">
-                <EditableTitle
-                  value={label}
-                  onSave={(title) => onRenameSession?.(session.id, title)}
-                  inputClassName="text-sm"
-                  disabled={!onRenameSession}
-                />
-                <span className="shrink-0 text-[10px] text-zinc-600">
-                  {formatWhen(session.updatedAt)}
-                </span>
-              </div>
-              {session.preview && (
-                <p className="mt-0.5 text-xs text-zinc-500 line-clamp-2">{session.preview}</p>
-              )}
-              <p className="mt-1 text-[10px] text-zinc-600">
-                {session.messageCount ?? 0} messages
-              </p>
-            </div>
-          </div>
-        </div>
-      </li>
-    );
-  };
-
-  const tabs: Array<{ id: SidebarTab; label: string; icon: typeof History }> = [
-    { id: "chat", label: "Chat", icon: MessagesSquare },
-    { id: "idea", label: "Idea", icon: Network },
-    { id: "history", label: "History", icon: History },
+  const tabs: Array<{ id: SidebarTab; label: string; icon: typeof MessagesSquare }> = [
+    { id: "chat", label: "Ideas", icon: MessagesSquare },
+    { id: "app", label: "Apps", icon: AppWindow },
   ];
 
   return (
     <aside className="flex h-full flex-col border-r border-zinc-800 bg-zinc-950">
       <div className="border-b border-zinc-800 px-3 py-3">
         <div className="flex items-center gap-2">
-          <div className="flex min-w-0 flex-1 gap-1 rounded-lg bg-zinc-900/80 p-1">
+          <div className="flex min-w-0 flex-1 gap-1 rounded-lg bg-zinc-900/80 p-1" role="tablist" aria-label="Workspace">
           {tabs.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               type="button"
+              role="tab"
+              aria-selected={tab === id}
               onClick={() => onTabChange(id)}
               className={cn(
-                "flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
+                "flex flex-1 items-center justify-center gap-1 rounded-md px-1 py-1.5 text-[11px] font-medium transition-colors sm:text-xs",
                 tab === id ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300"
               )}
             >
@@ -241,7 +172,7 @@ export function IdeaSidebar({
               type="button"
               onClick={onCloseMobile}
               className="shrink-0 rounded-lg p-2 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
-              aria-label="Close conversations"
+              aria-label="Close sidebar"
             >
               <PanelLeftClose className="h-5 w-5" />
             </button>
@@ -298,53 +229,50 @@ export function IdeaSidebar({
         </>
       )}
 
-      {tab === "idea" && (
-        <div className="flex-1 overflow-y-auto p-4">
-          <div className="flex items-center gap-2 text-sm font-medium text-zinc-200">
-            <Network className="h-4 w-4 text-amber-400" />
-            Idea map
-          </div>
-          <p className="mt-2 text-xs text-zinc-500">
-            See how ideas connect across chats. Each dot is an idea; lines show relationships.
-            Hover for thoughts from different conversations.
-          </p>
-          <p className="mt-2 text-[11px] text-zinc-600">
-            {totalIdeas} ideas · {linkCount} connections
-          </p>
-          <ul className="mt-3 space-y-1.5 text-[11px] text-zinc-500">
-            <li className="flex items-start gap-1.5">
-              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
-              Click an idea to open the chat where you last discussed it.
-            </li>
-          </ul>
-        </div>
-      )}
-
-      {tab === "history" && (
-        <>
-          <div className="border-b border-zinc-800 px-3 py-2">
-            <button
-              type="button"
-              onClick={onNewSession}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600/90 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-500"
-            >
-              <MessageSquarePlus className="h-3.5 w-3.5" />
-              New conversation
-            </button>
-          </div>
+      {tab === "app" && (
+        <div className="flex flex-1 flex-col">
           <div className="border-b border-zinc-800 px-4 py-2">
-            <p className="text-[10px] text-zinc-600">
-              Chronological log of every past conversation. Pick one to resume the full chat.
+            <p className="text-xs text-zinc-500">
+              {apps.length === 1 ? "1 app" : `${apps.length} apps`}
+            </p>
+            <p className="mt-0.5 text-[10px] text-zinc-600">
+              Each app is its own chat. Winston, John, Sally, and Amelia build in the folder.
             </p>
           </div>
           <div className="flex-1 overflow-y-auto p-2">
-            {sessions.length === 0 ? (
-              <p className="px-2 py-4 text-xs text-zinc-500">No past conversations yet.</p>
+            {apps.length === 0 ? (
+              <p className="px-2 py-4 text-xs text-zinc-500">
+                No apps yet. After Winston replies with a plan (via /winston or auto-route), use
+                Promote to an app. That creates a dedicated chat for the build.
+              </p>
             ) : (
-              <ul className="space-y-1">{sessions.map(renderSession)}</ul>
+              <ul className="space-y-1">
+                {apps.map((app) => (
+                  <li key={app.id}>
+                    <button
+                      type="button"
+                      onClick={() => onSelectApp?.(app.id)}
+                      className={cn(
+                        "w-full rounded-md px-2 py-2 text-left text-sm transition-colors",
+                        activeAppId === app.id
+                          ? "bg-indigo-600/15 ring-1 ring-indigo-500/30"
+                          : "hover:bg-zinc-800/60"
+                      )}
+                    >
+                      <div className="flex items-center gap-1.5 text-zinc-200">
+                        <AppWindow className="h-3 w-3 shrink-0 text-slate-400" />
+                        <span className="font-medium line-clamp-2">{app.title}</span>
+                      </div>
+                      <p className="mt-0.5 pl-4 text-[11px] text-zinc-500 line-clamp-2">
+                        {app.githubRepo || app.localPath}
+                      </p>
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
-        </>
+        </div>
       )}
     </aside>
   );

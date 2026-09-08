@@ -150,6 +150,55 @@ function followUpAgent(text: string, lastAgentId?: BmadAgentId): BmadAgentId | n
   return null;
 }
 
+/** Apps chat: Amelia builds by default; John / Winston / Sally when asked. */
+export function routeAppMessage(
+  message: string,
+  options?: { lastAgentId?: BmadAgentId }
+): RouteResult {
+  const trimmed = message.trim();
+
+  if (isCasualMessage(trimmed)) {
+    const last = options?.lastAgentId;
+    const agentId =
+      last === "architect" || last === "product-manager" || last === "ux-designer" || last === "developer"
+        ? last
+        : "developer";
+    return {
+      agentId,
+      reason: "Casual message — conversational reply",
+      matchedAgents: [{ id: agentId, label: "conversation" }],
+    };
+  }
+
+  if (/\b(sally|ux|ui|layout|screen|wireframe|flow|visual design|interaction)\b/i.test(trimmed)) {
+    return {
+      agentId: "ux-designer",
+      reason: "UX and interface work",
+      matchedAgents: [{ id: "ux-designer", label: "UX" }],
+    };
+  }
+  if (/\b(john|prd|mvp|scope|roadmap|user stor(?:y|ies)|product (?:plan|cut))\b/i.test(trimmed)) {
+    return {
+      agentId: "product-manager",
+      reason: "Product scope and MVP",
+      matchedAgents: [{ id: "product-manager", label: "product plan" }],
+    };
+  }
+  if (/\b(winston|architect(?:ure)?|tech stack|hosting|deploy(?:ment)?|infra(?:structure)?)\b/i.test(trimmed)) {
+    return {
+      agentId: "architect",
+      reason: "Architecture and hosting",
+      matchedAgents: [{ id: "architect", label: "architecture" }],
+    };
+  }
+
+  return {
+    agentId: "developer",
+    reason: "Build work in the app folder",
+    matchedAgents: [{ id: "developer", label: "implementation" }],
+  };
+}
+
 export function routeMessage(
   message: string,
   options?: { lastAgentId?: BmadAgentId; messageCount?: number }

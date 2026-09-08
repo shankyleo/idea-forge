@@ -1,14 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Send, Sparkles, AlertCircle, Wand2 } from "lucide-react";
-import type { AgentInfo, BmadAgentId, ChatMessage, DepthScore, HonestyBreakdown, SimilarIdeaNudge } from "@/lib/types";
+import { Send, Sparkles, AlertCircle, Wand2, FolderOpen, AppWindow } from "lucide-react";
+import type { AgentInfo, AppRecord, BmadAgentId, ChatMessage, DepthScore, HonestyBreakdown, SimilarIdeaNudge } from "@/lib/types";
 import { HonestyBreakdownCard } from "@/components/HonestyBreakdownCard";
 import { DepthBadge } from "@/components/DepthBadge";
 import { NavToggleButton, RelatedIdeas } from "@/components/IdeaSidebar";
 import { getAgent } from "@/lib/bmad/agents";
 import { AgentIcon } from "@/components/AgentIcon";
-import { SLASH_COMMAND_HINTS, filterSlashCommandOptions, getSlashPickerQuery, parseSlashCommand } from "@/lib/slash-commands";
+import { SLASH_COMMAND_HINTS, APP_SLASH_HINTS, filterSlashCommandOptions, getSlashPickerQuery, parseSlashCommand } from "@/lib/slash-commands";
 import { SlashCommandPicker } from "@/components/SlashCommandPicker";
 import { AgentReplyHeader } from "@/components/AgentReplyHeader";
 import { EditableTitle } from "@/components/EditableTitle";
@@ -23,6 +23,8 @@ import {
   PerspectiveCards,
   ForgeActionBar,
 } from "@/components/AssistantMessage";
+import { PromoteAppBar, AttachGithubForm } from "@/components/AppWorkspace";
+import { appKickoffMessage } from "@/lib/app-chat";
 import type { AgentPerspective } from "@/lib/types";
 
 const CHAT_TIMEOUT_MS = 300_000;
@@ -62,6 +64,10 @@ function AssistantBubble({
   onContinueSimilarChat,
   invokedViaSlash,
   slashCommand,
+  showPromote,
+  existingApp,
+  onPromote,
+  onOpenApp,
 }: {
   msg: ChatMessage;
   loading: boolean;
@@ -69,6 +75,10 @@ function AssistantBubble({
   onContinueSimilarChat?: (sessionId: string) => void;
   invokedViaSlash?: boolean;
   slashCommand?: string;
+  showPromote?: boolean;
+  existingApp?: boolean;
+  onPromote?: (input: { localPath: string; githubRepo?: string }) => Promise<string | null>;
+  onOpenApp?: () => void;
 }) {
   return (
     <div className="w-full rounded-2xl bg-zinc-800/60 px-4 py-3 ring-1 ring-zinc-700/50">
@@ -88,6 +98,14 @@ function AssistantBubble({
       )}
       {msg.showForgeActions && (
         <ForgeActionBar disabled={loading} onAction={onSend} />
+      )}
+      {showPromote && onPromote && (
+        <PromoteAppBar
+          disabled={loading}
+          alreadyPromoted={existingApp}
+          onOpenApp={onOpenApp}
+          onPromote={onPromote}
+        />
       )}
       {msg.relatedIdeas && msg.relatedIdeas.length > 0 && (
         <div className="mt-2">
@@ -118,6 +136,11 @@ interface ChatWindowProps {
   onOpenSidebar?: () => void;
   sidebarOpen?: boolean;
   showSidebarToggleOnDesktop?: boolean;
+  onAppPromoted?: (app: AppRecord) => void;
+  workspace?: "ideas" | "app";
+  app?: AppRecord | null;
+  onAttachGithub?: (appId: string, githubRepo: string) => Promise<string | null>;
+  onOpenSourceChat?: (sessionId: string) => void;
 }
 
 export function ChatWindow({
@@ -131,10 +154,17 @@ export function ChatWindow({
   onOpenSidebar,
   sidebarOpen = false,
   showSidebarToggleOnDesktop = false,
+  onAppPromoted,
+  workspace = "ideas",
+  app = null,
+  onAttachGithub,
+  onOpenSourceChat,
 }: ChatWindowProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [displayTitle, setDisplayTitle] = useState("New conversation");
   const [linkedIdeaTitle, setLinkedIdeaTitle] = useState<string | null>(null);
+  const [linkedIdeaId, setLinkedIdeaId] = useState<string | undefined>();
+  const [existingApp, setExistingApp] = useState<AppRecord | null>(null);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [statusLine, setStatusLine] = useState<string | null>(null);
@@ -158,8 +188,10 @@ export function ChatWindow({
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const slashQuery = getSlashPickerQuery(input);
-  const slashOptions = slashQuery !== null ? filterSlashCommandOptions(slashQuery) : [];
+  const slashOptions = slashQuery !== null ? filterSlashCommandOptions(slashQuery, workspace) : [];
   const slashPickerOpen = slashQuery !== null;
+  const slashHints = workspace === "app" ? APP_SLASH_HINTS : SLASH_COMMAND_HINTS;
+  const isAppWorkspace = workspace === "app";
 
   useEffect(() => {
     setSlashPickerIndex(0);
@@ -170,14 +202,30 @@ export function ChatWindow({
     const data = await res.json();
     setMessages(data.messages ?? []);
     if (data.displayTitle) setDisplayTitle(data.displayTitle as string);
-    if (data.idea?.title) setLinkedIdeaTitle(data.idea.title as string);
+    const idea = data.idea as { id?: string; title?: string } | undefined;
+    if (idea?.title) setLinkedIdeaTitle(idea.title);
     else setLinkedIdeaTitle(null);
+    setLinkedIdeaId(idea?.id);
+    if (isAppWorkspace) {
+      setExistingApp(app ?? null);
+    } else {
+      const appQuery = idea?.id
+        ? `/api/apps?ideaId=${encodeURIComponent(idea.id)}`
+        : `/api/apps?sessionId=${encodeURIComponent(sessionId)}`;
+      const appRes = await fetch(appQuery);
+      if (appRes.ok) {
+        const appData = await appRes.json();
+        setExistingApp(appData.app ?? null);
+      } else {
+        setExistingApp(null);
+      }
+    }
     if (data.ideaHonesty) {
       setIdeaHonesty(data.ideaHonesty as HonestyBreakdown);
     } else {
       setIdeaHonesty(null);
     }
-  }, [sessionId]);
+  }, [sessionId, isAppWorkspace, app]);
 
   const patchSession = useCallback(
     async (patch: { title?: string }) => {
@@ -195,11 +243,40 @@ export function ChatWindow({
     [sessionId, onSessionUpdated, onIdeasUpdated]
   );
 
+  const promoteApp = useCallback(
+    async (input: { localPath: string; githubRepo?: string }) => {
+      const res = await fetch("/api/apps", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          ideaId: linkedIdeaId,
+          localPath: input.localPath,
+          githubRepo: input.githubRepo,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) return (data.error as string) || "Could not promote this app";
+      setExistingApp(data.app);
+      onAppPromoted?.(data.app);
+      return null;
+    },
+    [sessionId, linkedIdeaId, onAppPromoted]
+  );
+
   useEffect(() => {
     loadMessages();
   }, [loadMessages]);
 
   const turns = useMemo(() => groupIntoTurns(messages), [messages]);
+
+  const latestWinstonId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const msg = messages[i];
+      if (msg.role === "assistant" && msg.agentId === "architect") return msg.id;
+    }
+    return null;
+  }, [messages]);
 
   const turnHonestyMap = useMemo(() => turnHonestyByUserId(turns), [turns]);
 
@@ -497,27 +574,65 @@ export function ChatWindow({
           )}
           <div className="min-w-0 flex-1">
             <p className="mb-1 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
-              <Sparkles className="h-3 w-3 text-amber-400" />
-              Idea Forge
+              {isAppWorkspace ? (
+                <>
+                  <AppWindow className="h-3 w-3 text-slate-400" />
+                  Apps
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-3 w-3 text-amber-400" />
+                  Idea Forge
+                </>
+              )}
             </p>
             <EditableTitle
-              value={displayTitle}
+              value={isAppWorkspace && app ? app.title : displayTitle}
               onSave={(title) => patchSession({ title })}
               inputClassName="text-lg"
               className="max-w-xl"
             />
-            {linkedIdeaTitle && linkedIdeaTitle !== displayTitle && (
+            {!isAppWorkspace && linkedIdeaTitle && linkedIdeaTitle !== displayTitle && (
               <p className="mt-0.5 truncate text-xs text-zinc-500">
                 Idea: {linkedIdeaTitle}
               </p>
             )}
+            {isAppWorkspace && app?.localPath && (
+              <p className="mt-0.5 flex items-center gap-1 truncate font-mono text-[11px] text-zinc-500">
+                <FolderOpen className="h-3 w-3 shrink-0" />
+                {app.localPath}
+              </p>
+            )}
+            {isAppWorkspace && app?.githubRepo ? (
+              <a
+                href={`https://github.com/${app.githubRepo}`}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-0.5 block truncate text-[11px] text-indigo-400 hover:text-indigo-300"
+              >
+                {app.githubRepo}
+              </a>
+            ) : isAppWorkspace && app ? (
+              <p className="mt-0.5 text-[11px] text-zinc-600">GitHub not set yet</p>
+            ) : null}
+            {isAppWorkspace && app?.sourceSessionId && onOpenSourceChat && (
+              <button
+                type="button"
+                onClick={() => onOpenSourceChat(app.sourceSessionId!)}
+                className="mt-1 text-[11px] text-zinc-500 hover:text-zinc-300"
+              >
+                Open idea chat
+              </button>
+            )}
             <p className="mt-1 flex items-center gap-1.5 text-xs text-zinc-500">
               <Wand2 className="h-3 w-3" />
-              Auto-routing · {agents.length} BMAD agents on call
+              {isAppWorkspace
+                ? "Winston · John · Sally · Amelia"
+                : `Auto-routing · ${agents.length} BMAD agents on call`}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            {headerHonesty && (
+            {!isAppWorkspace && headerHonesty && (
               <HonestyScoreBadge score={headerHonesty.score} delta={headerHonesty.delta} />
             )}
             {!cursorApiConfigured && (
@@ -555,7 +670,7 @@ export function ChatWindow({
       </header>
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
-        {similarNudge && (
+        {similarNudge && !isAppWorkspace && (
           <div className="mx-auto mb-4 max-w-3xl rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-4 py-3 text-sm text-indigo-100">
             <p>
               This sounds like an idea you explored before:{" "}
@@ -575,6 +690,38 @@ export function ChatWindow({
         )}
         {messages.length === 0 && !streamingContent && (
           <div className="mx-auto max-w-xl pt-12 text-center">
+            {isAppWorkspace ? (
+              <>
+                <p className="text-zinc-400">
+                  This chat is dedicated to this app. Winston, John, Sally, and Amelia work in
+                  the folder you picked.
+                </p>
+                <p className="mt-2 text-xs text-zinc-600">
+                  Type <span className="text-zinc-400">/</span> to pick an agent, or press Get
+                  started once the folder is set.
+                </p>
+                {app?.localPath && (
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => void sendMessage(appKickoffMessage(app))}
+                    className="mt-5 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-40"
+                  >
+                    Get started
+                  </button>
+                )}
+                {app && !app.githubRepo && onAttachGithub && (
+                  <div className="mx-auto mt-4 max-w-sm text-left">
+                    <AttachGithubForm onAttach={(repo) => onAttachGithub(app.id, repo)} />
+                  </div>
+                )}
+                <p className="mt-3 text-xs text-zinc-500">
+                  {getAgent("architect").name}, {getAgent("product-manager").name},{" "}
+                  {getAgent("ux-designer").name}, and {getAgent("developer").name}
+                </p>
+              </>
+            ) : (
+              <>
             <p className="text-zinc-400">
               Just type — Idea Forge picks the right BMAD agent for what you say: new ideas,
               pushback, research, honesty checks, brainstorming, and more.
@@ -588,8 +735,10 @@ export function ChatWindow({
               {getAgent("design-thinking").name} weigh in as a panel, then a lead reply. Type{" "}
               <span className="text-zinc-400">/</span> to talk to one agent directly:
             </p>
+              </>
+            )}
             <div className="mt-2 flex flex-wrap justify-center gap-1.5">
-              {SLASH_COMMAND_HINTS.map(({ command, agentId }) => (
+              {slashHints.map(({ command, agentId }) => (
                 <button
                   key={command}
                   type="button"
@@ -627,7 +776,7 @@ export function ChatWindow({
             const slash = turn.user.content
               ? parseSlashCommand(turn.user.content.trim())
               : null;
-            const showPanel = !slash || slash.agentId === "party-mode";
+            const showPanel = !isAppWorkspace && (!slash || slash.agentId === "party-mode");
             const livePerspectives =
               showPanel &&
               isLiveTurn &&
@@ -650,6 +799,15 @@ export function ChatWindow({
                     loading={loading}
                     onSend={(t) => void sendMessage(t)}
                     onContinueSimilarChat={onContinueSimilarChat}
+                    showPromote={
+                      !isAppWorkspace &&
+                      turn.assistant.agentId === "architect" &&
+                      turn.assistant.id === latestWinstonId &&
+                      turn.assistant.content.trim().length >= 400
+                    }
+                    existingApp={Boolean(existingApp)}
+                    onPromote={promoteApp}
+                    onOpenApp={() => existingApp && onAppPromoted?.(existingApp)}
                   />
                 </div>
               );
@@ -688,6 +846,15 @@ export function ChatWindow({
                     onContinueSimilarChat={onContinueSimilarChat}
                     invokedViaSlash={Boolean(slash)}
                     slashCommand={slash?.command}
+                    showPromote={
+                      !isAppWorkspace &&
+                      turn.assistant.agentId === "architect" &&
+                      turn.assistant.id === latestWinstonId &&
+                      turn.assistant.content.trim().length >= 400
+                    }
+                    existingApp={Boolean(existingApp)}
+                    onPromote={promoteApp}
+                    onOpenApp={() => existingApp && onAppPromoted?.(existingApp)}
                   />
                 )}
 
@@ -742,7 +909,11 @@ export function ChatWindow({
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleInputKeyDown}
-              placeholder="Type / to pick an agent, or describe your idea…"
+              placeholder={
+                isAppWorkspace
+                  ? "Type / for Winston, John, Sally, or Amelia — or describe the next build step…"
+                  : "Type / to pick an agent, or describe your idea…"
+              }
               rows={2}
               className="flex-1 resize-none rounded-xl border border-zinc-700 bg-zinc-900/80 px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-indigo-500/50 focus:outline-none focus:ring-1 focus:ring-indigo-500/30"
               disabled={loading}

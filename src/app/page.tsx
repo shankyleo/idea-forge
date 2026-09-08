@@ -1,15 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { AgentInfo, ChatSession, IdeaGraph, IdeaGroup, IdeaRecord, IdeaThought } from "@/lib/types";
+import type { AgentInfo, AppRecord, ChatSession, IdeaGroup } from "@/lib/types";
 import {
   IdeaSidebar,
+  NavToggleButton,
   getStoredSessionId,
   storeSessionId,
   type SidebarTab,
 } from "@/components/IdeaSidebar";
 import { ChatWindow } from "@/components/ChatWindow";
-import { IdeaMap } from "@/components/IdeaMap";
+import { AppsEmptyState } from "@/components/AppWorkspace";
+import { APP_TEAM_IDS } from "@/lib/bmad/agents";
 import { cn } from "@/lib/utils";
 
 const INIT_TIMEOUT_MS = 15_000;
@@ -32,18 +34,13 @@ export default function HomePage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [groups, setGroups] = useState<IdeaGroup[]>([]);
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeIdeaId, setActiveIdeaId] = useState<string | undefined>();
-  const [ideaDetail, setIdeaDetail] = useState<IdeaRecord | null>(null);
-  const [relatedIdeas, setRelatedIdeas] = useState<
-    Array<IdeaRecord & { linkReason: string; score: number }>
-  >([]);
   const [cursorApiConfigured, setCursorApiConfigured] = useState(false);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<SidebarTab>("chat");
-  const [graph, setGraph] = useState<IdeaGraph>({ nodes: [], edges: [] });
-  const [thoughts, setThoughts] = useState<IdeaThought[]>([]);
+  const [apps, setApps] = useState<AppRecord[]>([]);
+  const [activeAppId, setActiveAppId] = useState<string | undefined>();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [desktopNavCollapsed, setDesktopNavCollapsed] = useState(false);
 
@@ -57,32 +54,20 @@ export default function HomePage() {
     setDesktopNavCollapsed(true);
   }, []);
 
-  const loadGraph = useCallback(async () => {
-    const res = await fetchWithTimeout("/api/ideas?graph=1");
+  const loadApps = useCallback(async () => {
+    const res = await fetchWithTimeout("/api/apps");
     if (!res.ok) return;
     const data = await res.json();
-    setGraph({ nodes: data.nodes ?? [], edges: data.edges ?? [] });
-    setThoughts(data.thoughts ?? []);
+    const next = (data.apps ?? []) as AppRecord[];
+    setApps(next);
+    setActiveAppId((current) => current ?? next[0]?.id);
   }, []);
 
   const loadSidebar = useCallback(async () => {
-    const [ideasRes, sessionsRes] = await Promise.all([
-      fetchWithTimeout("/api/ideas?grouped=1"),
-      fetchWithTimeout("/api/sessions"),
-    ]);
-    if (!ideasRes.ok || !sessionsRes.ok) throw new Error("Failed to load sidebar data");
+    const ideasRes = await fetchWithTimeout("/api/ideas?grouped=1");
+    if (!ideasRes.ok) throw new Error("Failed to load sidebar data");
     const ideasData = await ideasRes.json();
-    const sessionsData = await sessionsRes.json();
     setGroups(ideasData.groups ?? []);
-    setSessions(sessionsData.sessions ?? []);
-  }, []);
-
-  const loadIdeaDetail = useCallback(async (ideaId: string) => {
-    const res = await fetchWithTimeout(`/api/ideas?id=${ideaId}`);
-    if (!res.ok) return;
-    const data = await res.json();
-    setIdeaDetail(data.idea ?? null);
-    setRelatedIdeas(data.related ?? []);
   }, []);
 
   const init = useCallback(async () => {
@@ -105,7 +90,6 @@ export default function HomePage() {
         if (resumeRes.ok) {
           const data = await resumeRes.json();
           if (data.session?.id) session = data.session;
-          if (data.sessions) setSessions(data.sessions);
         }
       }
 
@@ -119,7 +103,6 @@ export default function HomePage() {
           if (withMessages) {
             session = withMessages;
           }
-          setSessions(data.sessions ?? []);
         }
       }
 
@@ -143,6 +126,7 @@ export default function HomePage() {
       // the user can click into.
 
       await loadSidebar();
+      await loadApps();
       setReady(true);
     } catch (e) {
       const isTimeout = e instanceof Error && e.name === "AbortError";
@@ -155,7 +139,7 @@ export default function HomePage() {
       );
       setReady(false);
     }
-  }, [loadSidebar]);
+  }, [loadSidebar, loadApps]);
 
   useEffect(() => {
     init();
@@ -187,8 +171,7 @@ export default function HomePage() {
       // Show the whole conversation for the selected session, not just one
       // idea's thread, so nothing typed in this chat is hidden.
       setActiveIdeaId(undefined);
-      setIdeaDetail(null);
-      setRelatedIdeas([]);
+      setTab("chat");
       await loadSidebar();
     },
     [loadSidebar, closeMobileNav]
@@ -197,12 +180,45 @@ export default function HomePage() {
   const handleTabChange = useCallback(
     (next: SidebarTab) => {
       setTab(next);
-      if (next === "idea") {
-        void loadGraph();
-        closeMobileNav();
-      }
+      if (next === "app") void loadApps();
+      closeMobileNav();
     },
-    [loadGraph, closeMobileNav]
+    [loadApps, closeMobileNav]
+  );
+
+  const handleSelectApp = useCallback(
+    (id: string) => {
+      setActiveAppId(id);
+      setTab("app");
+      closeMobileNav();
+    },
+    [closeMobileNav]
+  );
+
+  const handleAppPromoted = useCallback(
+    async (app: AppRecord) => {
+      await loadApps();
+      setActiveAppId(app.id);
+      setTab("app");
+      closeMobileNav();
+    },
+    [loadApps, closeMobileNav]
+  );
+
+  const handleAttachGithub = useCallback(
+    async (appId: string, githubRepo: string) => {
+      const res = await fetch("/api/apps", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: appId, githubRepo }),
+      });
+      const data = await res.json();
+      if (!res.ok) return (data.error as string) || "Could not attach GitHub";
+      await loadApps();
+      if (data.app?.id) setActiveAppId(data.app.id);
+      return null;
+    },
+    [loadApps]
   );
 
   const handleSelectIdea = useCallback(
@@ -214,6 +230,7 @@ export default function HomePage() {
         storeSessionId(data.session.id);
         setSessionId(data.session.id);
       }
+      setActiveIdeaId(ideaId);
       setTab("chat");
       closeMobileNav();
       await loadSidebar();
@@ -232,42 +249,13 @@ export default function HomePage() {
     storeSessionId(data.session.id);
     setSessionId(data.session.id);
     setActiveIdeaId(undefined);
-    setIdeaDetail(null);
-    setRelatedIdeas([]);
     closeMobileNav();
     await loadSidebar();
   }, [loadSidebar, closeMobileNav]);
 
-  const handleClearIdea = useCallback(async () => {
-    setActiveIdeaId(undefined);
-    setIdeaDetail(null);
-    setRelatedIdeas([]);
-    if (sessionId) {
-      await fetchWithTimeout("/api/sessions", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: sessionId, activeIdeaId: null }),
-      });
-    }
-  }, [sessionId]);
-
   const handleIdeasUpdated = useCallback(async () => {
     await loadSidebar();
-    if (activeIdeaId) await loadIdeaDetail(activeIdeaId);
-    if (tab === "idea") await loadGraph();
-  }, [loadSidebar, loadIdeaDetail, activeIdeaId, tab, loadGraph]);
-
-  const handleRenameSession = useCallback(
-    async (id: string, title: string) => {
-      await fetchWithTimeout("/api/sessions", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, title }),
-      });
-      await loadSidebar();
-    },
-    [loadSidebar]
-  );
+  }, [loadSidebar]);
 
   const handleTogglePinIdea = useCallback(
     async (id: string, pinned: boolean) => {
@@ -305,12 +293,14 @@ export default function HomePage() {
     );
   }
 
+  const activeApp = apps.find((a) => a.id === activeAppId) ?? apps[0];
+
   return (
     <main className="flex h-screen overflow-hidden bg-zinc-950 text-zinc-100">
       {mobileNavOpen && (
         <button
           type="button"
-          aria-label="Dismiss conversation menu"
+          aria-label="Dismiss sidebar"
           className="fixed inset-0 z-30 bg-black/60 md:hidden"
           onClick={closeMobileNav}
         />
@@ -330,37 +320,57 @@ export default function HomePage() {
             tab={tab}
             onTabChange={handleTabChange}
             groups={groups}
-            sessions={sessions}
-            linkCount={graph.edges.length}
             activeIdeaId={activeIdeaId}
-            activeSessionId={sessionId}
-            ideaDetail={ideaDetail}
-            relatedIdeas={relatedIdeas}
             onSelectIdea={handleSelectIdea}
-            onSelectSession={handleSelectSession}
             onNewSession={handleNewSession}
-            onClearIdea={handleClearIdea}
-            onRenameSession={handleRenameSession}
             onTogglePinIdea={handleTogglePinIdea}
             onCloseMobile={collapseNav}
+            apps={apps}
+            activeAppId={activeAppId}
+            onSelectApp={handleSelectApp}
           />
         </div>
       </div>
       <div className="min-w-0 flex-1" inert={mobileNavOpen ? true : undefined}>
-        {tab === "idea" ? (
-          <IdeaMap
-            graph={graph}
-            thoughts={thoughts}
-            onSelectIdea={handleSelectIdea}
-            onOpenSidebar={openNav}
-            sidebarOpen={mobileNavOpen || !desktopNavCollapsed}
-            showSidebarToggleOnDesktop={desktopNavCollapsed}
-          />
+        {tab === "app" ? (
+          activeApp ? (
+            <ChatWindow
+              key={activeApp.sessionId}
+              sessionId={activeApp.sessionId}
+              workspace="app"
+              app={activeApp}
+              agents={agents.filter((agent) =>
+                (APP_TEAM_IDS as readonly string[]).includes(agent.id)
+              )}
+              cursorApiConfigured={cursorApiConfigured}
+              onIdeasUpdated={handleIdeasUpdated}
+              onSessionUpdated={loadApps}
+              onOpenSidebar={openNav}
+              sidebarOpen={mobileNavOpen || !desktopNavCollapsed}
+              showSidebarToggleOnDesktop={desktopNavCollapsed}
+              onAttachGithub={handleAttachGithub}
+              onOpenSourceChat={
+                activeApp.sourceSessionId ? handleSelectSession : undefined
+              }
+            />
+          ) : (
+            <div className="flex h-full min-w-0 flex-col">
+              <header className="flex items-center gap-2 border-b border-zinc-800 px-4 py-3">
+                <NavToggleButton
+                  onClick={openNav}
+                  open={mobileNavOpen || !desktopNavCollapsed}
+                  visibleOnDesktop={desktopNavCollapsed}
+                />
+                <p className="text-sm font-medium text-zinc-200">Apps</p>
+              </header>
+              <AppsEmptyState />
+            </div>
+          )
         ) : (
           <ChatWindow
             key={sessionId}
             sessionId={sessionId}
-            agents={agents}
+            agents={agents.filter((agent) => agent.id !== "ux-designer" && agent.id !== "developer")}
             cursorApiConfigured={cursorApiConfigured}
             onIdeasUpdated={handleIdeasUpdated}
             onSessionActivity={() => storeSessionId(sessionId)}
@@ -369,6 +379,7 @@ export default function HomePage() {
             onOpenSidebar={openNav}
             sidebarOpen={mobileNavOpen || !desktopNavCollapsed}
             showSidebarToggleOnDesktop={desktopNavCollapsed}
+            onAppPromoted={handleAppPromoted}
           />
         )}
       </div>

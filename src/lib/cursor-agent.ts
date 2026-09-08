@@ -38,6 +38,12 @@ export interface AgentRunOptions {
   /** When set, sent as the full user prompt (skips default USER wrapper). */
   promptOverride?: string;
   crossChatContext?: string;
+  /** Working directory for Cursor tools (app folder in Apps chat). */
+  workspaceCwd?: string;
+  workspace?: "ideas" | "app";
+  localPath?: string;
+  githubRepo?: string;
+  onStatus?: (message: string) => void;
 }
 
 export function hasCursorApiKey(): boolean {
@@ -67,6 +73,9 @@ export async function runAgentOnce(
     relatedIdeas: options.relatedIdeas,
     ideaTitle: options.ideaTitle,
     researchBlock: options.researchBlock,
+    workspace: options.workspace,
+    localPath: options.localPath,
+    githubRepo: options.githubRepo,
   });
 
   const crossBlock = options.crossChatContext
@@ -87,7 +96,7 @@ export async function runAgentOnce(
   const agent = await Agent.create({
     apiKey,
     model: { id: "composer-2.5" },
-    local: { cwd: process.cwd() },
+    local: { cwd: options.workspaceCwd ?? process.cwd() },
   });
 
   const run = await agent.send(prompt);
@@ -135,6 +144,9 @@ async function* streamWithCursorSdk(
     relatedIdeas: options.relatedIdeas,
     ideaTitle: options.ideaTitle,
     researchBlock: options.researchBlock,
+    workspace: options.workspace,
+    localPath: options.localPath,
+    githubRepo: options.githubRepo,
   });
 
   const historyBlock =
@@ -147,7 +159,7 @@ async function* streamWithCursorSdk(
   const agent = await Agent.create({
     apiKey,
     model: { id: "composer-2.5" },
-    local: { cwd: process.cwd() },
+    local: { cwd: options.workspaceCwd ?? process.cwd() },
   });
 
   const forgePrefix =
@@ -161,11 +173,17 @@ async function* streamWithCursorSdk(
     ? `\n\n## Context from other chats\n${options.crossChatContext}`
     : "";
 
-  const prompt = `${systemPrompt}${crossBlock}${historyBlock}\n\nUSER: ${options.message}${forgePrefix}\n\nRespond as the active BMAD agent. Use the required response format.`;
+  const prompt = `${systemPrompt}${crossBlock}${historyBlock}\n\nUSER: ${options.message}${forgePrefix}\n\nRespond as the active BMAD agent.${
+    options.workspace === "app"
+      ? " Work in the app folder. Write and edit files there when the task needs code."
+      : " Use the required response format."
+  }`;
 
   const run = await agent.send(prompt);
   let idleDeadline = Date.now() + CURSOR_TIMEOUT_MS;
   let gotText = false;
+  const agentName = getAgent(options.agentId).name;
+  options.onStatus?.(`${agentName} is working…`);
 
   for await (const event of run.stream()) {
     if (Date.now() > idleDeadline) {
@@ -178,6 +196,8 @@ async function* streamWithCursorSdk(
       return;
     }
     idleDeadline = Date.now() + CURSOR_TIMEOUT_MS;
+    const activity = statusFromSdkEvent(event, agentName);
+    if (activity) options.onStatus?.(activity);
     const text = extractTextFromEvent(event);
     if (text) {
       gotText = true;
@@ -188,6 +208,42 @@ async function* streamWithCursorSdk(
   if (!gotText) {
     yield* streamFallbackResponse(options, new Error("No response from Cursor agent"));
   }
+}
+
+function toolStatusLabel(name: string, agentName: string): string {
+  const n = name.toLowerCase();
+  if (n.includes("shell") || n.includes("bash") || n === "exec") {
+    return `${agentName} is running a command…`;
+  }
+  if (n.includes("write") || n.includes("edit") || n.includes("strreplace") || n.includes("apply")) {
+    return `${agentName} is writing files…`;
+  }
+  if (n.includes("read") || n.includes("grep") || n.includes("glob") || n.includes("search")) {
+    return `${agentName} is reading the project…`;
+  }
+  if (n.includes("npm") || n.includes("install")) {
+    return `${agentName} is installing dependencies…`;
+  }
+  return `${agentName} is working…`;
+}
+
+function statusFromSdkEvent(event: unknown, agentName: string): string | null {
+  if (!event || typeof event !== "object") return null;
+  const e = event as Record<string, unknown>;
+  if (e.type === "tool_call") {
+    const name = typeof e.name === "string" ? e.name : "tool";
+    if (e.status === "completed" || e.status === "error") return `${agentName} is working…`;
+    return toolStatusLabel(name, agentName);
+  }
+  if (e.type === "thinking") return `${agentName} is thinking…`;
+  if (e.type === "assistant" && e.message && typeof e.message === "object") {
+    const content =
+      (e.message as { content?: Array<{ type?: string; name?: string }> }).content ?? [];
+    const tool = content.find((block) => block.type === "tool_use");
+    if (tool?.name) return toolStatusLabel(tool.name, agentName);
+  }
+  if (e.type === "status" && e.status === "RUNNING") return `${agentName} is working…`;
+  return null;
 }
 
 function extractTextFromEvent(event: unknown): string | null {
@@ -265,6 +321,10 @@ async function* streamFallbackResponse(
     "product-manager": `### At a glance\n\nMVP first: one job, one user, one surface.\n\n### Plan\n- **MVP:** the smallest loop that proves the idea.\n- **Platform:** web unless the job is on-the-go; add mobile only if capture or notifications are core.\n- **Build:** (1) core loop (2) accounts (3) share or export.\n\nAdd CURSOR_API_KEY for a plan from *this* thread.${relatedNote}${errorNote}`,
 
     architect: `### At a glance\n\nShip a web app first; wrap native later if the web flow fails on device features.\n\n### Plan\n- **Stack:** one web app, one data store, one file/blob store.\n- **Host:** app host + managed DB + object storage.\n- **Mobile:** PWA first, native only if camera/offline require it.\n\nAdd CURSOR_API_KEY for a plan from *this* thread.${relatedNote}${errorNote}`,
+
+    "ux-designer": `### At a glance\n\nName one job and one screen. I'll sketch the flow, empty states, and what not to build yet.\n\nAdd CURSOR_API_KEY for UX from *this* thread.${relatedNote}${errorNote}`,
+
+    developer: `### At a glance\n\nI'll implement in the app folder: read START.md / SPEC.md / ARCHITECTURE.md / BUILD.md, then write the MVP there.\n\nAdd CURSOR_API_KEY so I can actually edit those files.${relatedNote}${errorNote}`,
 
     "party-mode": `### At a glance\n\n**${getAgent("forge").name}:** Weakest assumption?\n**${getAgent("deep-recon").name}:** What data validates this?\n**${getAgent("innovation").name}:** Disruption angle?${relatedNote}${errorNote}`,
   };

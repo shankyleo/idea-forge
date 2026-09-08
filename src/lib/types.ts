@@ -27,6 +27,8 @@ export type BmadAgentId =
   | "problem-solving"
   | "product-manager"
   | "architect"
+  | "ux-designer"
+  | "developer"
   | "party-mode";
 
 export interface DepthScore {
@@ -68,6 +70,23 @@ export interface IdeaRecord {
   status: "draft" | "forging" | "validated" | "archived";
   pinned?: boolean;
   pinnedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AppRecord {
+  id: string;
+  ideaId?: string;
+  sessionId: string;
+  sourceSessionId?: string;
+  title: string;
+  objective: string;
+  localPath: string;
+  githubRepo: string;
+  getStarted: string;
+  ghStatus?: string;
+  previewUrl?: string;
+  previewPort?: number;
   createdAt: string;
   updatedAt: string;
 }

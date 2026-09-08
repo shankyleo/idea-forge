@@ -38,6 +38,12 @@ const SLASH_ALIASES: Record<string, BmadAgentId> = {
   winston: "architect",
   architect: "architect",
   architecture: "architect",
+  sally: "ux-designer",
+  ux: "ux-designer",
+  "ux-designer": "ux-designer",
+  amelia: "developer",
+  dev: "developer",
+  developer: "developer",
   party: "party-mode",
   "party-mode": "party-mode",
 };
@@ -57,6 +63,14 @@ export const SLASH_COMMAND_HINTS: Array<{ command: string; agentId: BmadAgentId 
   { command: "/party", agentId: "party-mode" },
 ];
 
+/** Slash hints for the Apps chat (build team only). */
+export const APP_SLASH_HINTS: Array<{ command: string; agentId: BmadAgentId }> = [
+  { command: "/winston", agentId: "architect" },
+  { command: "/john", agentId: "product-manager" },
+  { command: "/sally", agentId: "ux-designer" },
+  { command: "/amelia", agentId: "developer" },
+];
+
 export interface SlashCommandOption {
   command: string;
   label: string;
@@ -67,8 +81,9 @@ export interface SlashCommandOption {
   color: string;
 }
 
-export function getSlashCommandOptions(): SlashCommandOption[] {
-  return SLASH_COMMAND_HINTS.map(({ command, agentId }) => {
+export function getSlashCommandOptions(workspace: "ideas" | "app" = "ideas"): SlashCommandOption[] {
+  const hints = workspace === "app" ? APP_SLASH_HINTS : SLASH_COMMAND_HINTS;
+  return hints.map(({ command, agentId }) => {
     const agent = getAgent(agentId);
     return {
       command: command.slice(1),
@@ -88,8 +103,11 @@ export function getSlashPickerQuery(input: string): string | null {
   return match ? match[1].toLowerCase() : null;
 }
 
-export function filterSlashCommandOptions(query: string): SlashCommandOption[] {
-  const options = getSlashCommandOptions();
+export function filterSlashCommandOptions(
+  query: string,
+  workspace: "ideas" | "app" = "ideas"
+): SlashCommandOption[] {
+  const options = getSlashCommandOptions(workspace);
   if (!query) return options;
   return options.filter(
     (o) =>

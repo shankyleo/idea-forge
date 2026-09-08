@@ -10,18 +10,19 @@ import {
   getCrossChatContext,
   getIdeaHonestySnapshot,
   updateMessageHonestyBreakdown,
+  getAppForChatSession,
 } from "@/lib/db";
 import { streamAgentResponse } from "@/lib/cursor-agent";
 import { findRelatedIdeas, linkRelatedIdeas } from "@/lib/idea-linker";
 import { runDeepRecon } from "@/lib/web-research";
 import { shouldRunWebResearch, shouldRunPanelResearch, isCasualMessage, shouldExtractNewIdea } from "@/lib/message-utils";
 import { runHonestyBreakdown } from "@/lib/honesty-agent";
-import { routeMessage } from "@/lib/agent-router";
+import { routeMessage, routeAppMessage } from "@/lib/agent-router";
 import { parseSlashCommand, slashRouteReason, shouldRunTeamPanel, shouldTrackIdeaHonesty, shouldRunSlashAwareResearch } from "@/lib/slash-commands";
 import { runPanelPerspectives } from "@/lib/panel-agents";
 import { computeIdeaHonestyUpdate } from "@/lib/idea-honesty";
 import { scoreHonesty } from "@/lib/honesty-scorer";
-import { getAgent } from "@/lib/bmad/agents";
+import { getAgent, isAppTeamAgent } from "@/lib/bmad/agents";
 import type { DepthScore, HonestyBreakdown, AgentPerspective } from "@/lib/types";
 import type { DeepReconResult } from "@/lib/web-research";
 
@@ -86,7 +87,11 @@ export async function POST(request: Request) {
       (m) => m.role === "user" && !/^(attack|defend) this/i.test(m.content.trim())
     )?.content;
 
-  const slash = parseSlashCommand(message.trim());
+  const slashRaw = parseSlashCommand(message.trim());
+  const appRecord = getAppForChatSession(sessionId);
+  const isAppChat = Boolean(appRecord);
+  const slash =
+    isAppChat && slashRaw && !isAppTeamAgent(slashRaw.agentId) ? null : slashRaw;
 
   const route = slash
     ? {
@@ -94,10 +99,14 @@ export async function POST(request: Request) {
         reason: slashRouteReason(slash.command),
         matchedAgents: [{ id: slash.agentId, label: `/${slash.command}` }],
       }
-    : routeMessage(message, {
-        lastAgentId: lastAssistant?.agentId,
-        messageCount: historyMessages.length,
-      });
+    : isAppChat
+      ? routeAppMessage(message, {
+          lastAgentId: lastAssistant?.agentId,
+        })
+      : routeMessage(message, {
+          lastAgentId: lastAssistant?.agentId,
+          messageCount: historyMessages.length,
+        });
 
   const agentId = route.agentId;
   updateSession(sessionId, { activeAgentId: agentId });
@@ -113,6 +122,7 @@ export async function POST(request: Request) {
   const casual = slash ? false : isCasualMessage(message);
   const priorUserMessages = historyMessages.filter((m) => m.role === "user").length;
   const mintNewIdea =
+    !isAppChat &&
     !casual &&
     !session.activeIdeaId &&
     !clientIdeaId &&
@@ -134,7 +144,7 @@ export async function POST(request: Request) {
     ideaId = clientIdeaId;
   }
 
-  const related = casual ? [] : findRelatedIdeas(workingMessage, ideaId);
+  const related = isAppChat || casual ? [] : findRelatedIdeas(workingMessage, ideaId);
   if (ideaId && related.length > 0) {
     linkRelatedIdeas(ideaId, related);
   }
@@ -216,15 +226,17 @@ export async function POST(request: Request) {
       let perspectives: AgentPerspective[] = [];
 
       try {
-        const runPanel = shouldRunTeamPanel(slash, casual);
-        const runResearch = shouldRunSlashAwareResearch(
-          slash,
-          agentId,
-          workingMessage,
-          shouldRunWebResearch,
-          shouldRunPanelResearch,
-          casual
-        );
+        const runPanel = !isAppChat && shouldRunTeamPanel(slash, casual);
+        const runResearch =
+          !isAppChat &&
+          shouldRunSlashAwareResearch(
+            slash,
+            agentId,
+            workingMessage,
+            shouldRunWebResearch,
+            shouldRunPanelResearch,
+            casual
+          );
 
         if (runResearch) {
           send({
@@ -261,7 +273,7 @@ export async function POST(request: Request) {
           send({ type: "perspectives", perspectives });
         }
 
-        if (agentId === "honesty-coach" && !casual) {
+        if (!isAppChat && agentId === "honesty-coach" && !casual) {
           send({ type: "status", message: `${getAgent("honesty-coach").name} analyzing claims...` });
           const result = await runHonestyBreakdown(workingMessage);
           honestyBreakdown = result.breakdown ?? undefined;
@@ -292,12 +304,12 @@ export async function POST(request: Request) {
           matchedAgents: route.matchedAgents,
           perspectives: runPanel ? perspectives : [],
           directInvoke: Boolean(slash && slash.agentId !== "party-mode"),
-          showForgeActions: !casual && agentId !== "honesty-coach",
+          showForgeActions: !isAppChat && !casual && agentId !== "honesty-coach",
           userMessageId: userMsgId,
           assistantMessageId: assistantMsgId,
         });
 
-        if (agentId === "honesty-coach" && !casual && honestyNarrative) {
+        if (!isAppChat && agentId === "honesty-coach" && !casual && honestyNarrative) {
           fullResponse = honestyNarrative;
           const chunks = honestyNarrative.split(/(?<=\.|!|\?|\n)\s+/);
           for (const chunk of chunks) {
@@ -313,13 +325,17 @@ export async function POST(request: Request) {
             message: workingMessage,
             history: history.slice(0, -1),
             relatedIdeas: relatedForPrompt,
-            ideaTitle: extractedIdea?.title ?? ideaTitle,
+            ideaTitle: appRecord?.title ?? extractedIdea?.title ?? ideaTitle,
             researchBlock,
             depthScore,
             recon: reconResult,
             forgeMode,
             topicMessage: topicMessage ?? workingMessage,
-            crossChatContext: fullCrossChat || undefined,
+            crossChatContext: isAppChat ? undefined : fullCrossChat || undefined,
+            workspace: isAppChat ? "app" : "ideas",
+            workspaceCwd: appRecord?.localPath,
+            localPath: appRecord?.localPath,
+            githubRepo: appRecord?.githubRepo,
           })) {
             fullResponse += chunk;
             send({ type: "chunk", content: chunk });
@@ -327,7 +343,7 @@ export async function POST(request: Request) {
         }
 
         let finalUserHonesty: HonestyBreakdown | undefined;
-        if (!casual) {
+        if (!isAppChat && !casual) {
           finalUserHonesty =
             agentId === "honesty-coach" && honestyBreakdown
               ? honestyBreakdown
@@ -361,14 +377,14 @@ export async function POST(request: Request) {
           routeReason: route.reason,
           matchedAgents: route.matchedAgents,
           perspectives: runPanel ? perspectives : [],
-          showForgeActions: !casual && agentId !== "honesty-coach",
+          showForgeActions: !isAppChat && !casual && agentId !== "honesty-coach",
           depthScore: depthForClient,
         });
 
         send({
           type: "done",
           perspectives: runPanel ? perspectives : [],
-          showForgeActions: !casual && agentId !== "honesty-coach",
+          showForgeActions: !isAppChat && !casual && agentId !== "honesty-coach",
           depthScore: depthForClient,
           ideaHonesty: shouldTrackIdeaHonesty(slash, casual) && ideaId
             ? getIdeaHonestySnapshot(ideaId) ?? undefined

@@ -12,6 +12,7 @@ import {
   getIdeaHonestySnapshot,
   upsertIdea,
   repairGenericSessionTitles,
+  getAppForChatSession,
 } from "@/lib/db";
 import { resolveSessionDisplayTitle } from "@/lib/session-titles";
 import type { BmadAgentId } from "@/lib/types";
@@ -67,7 +68,7 @@ export async function GET(request: Request) {
     const lastId = searchParams.get("lastId");
     if (lastId) {
       const session = getSession(lastId);
-      if (session) {
+      if (session && !getAppForChatSession(lastId)) {
         return NextResponse.json({
           session: { ...session, messageCount: getMessages(lastId).length },
           messages: getMessages(lastId),

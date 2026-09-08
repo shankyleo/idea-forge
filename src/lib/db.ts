@@ -8,6 +8,7 @@ import type {
   ChatSession,
   DepthScore,
   HonestyBreakdown,
+  AppRecord,
   IdeaLink,
   IdeaRecord,
 } from "@/lib/types";
@@ -78,6 +79,20 @@ function initSchema(database: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
     CREATE INDEX IF NOT EXISTS idx_ideas_updated ON ideas(updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS apps (
+      id TEXT PRIMARY KEY,
+      idea_id TEXT,
+      session_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      objective TEXT NOT NULL DEFAULT '',
+      local_path TEXT NOT NULL,
+      github_repo TEXT NOT NULL,
+      get_started TEXT NOT NULL DEFAULT '',
+      gh_status TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   try {
@@ -132,6 +147,21 @@ function initSchema(database: Database.Database) {
   }
   try {
     database.exec(`ALTER TABLE ideas ADD COLUMN pinned_at TEXT`);
+  } catch {
+    // column already exists
+  }
+  try {
+    database.exec(`ALTER TABLE apps ADD COLUMN source_session_id TEXT`);
+  } catch {
+    // column already exists
+  }
+  try {
+    database.exec(`ALTER TABLE apps ADD COLUMN preview_url TEXT`);
+  } catch {
+    // column already exists
+  }
+  try {
+    database.exec(`ALTER TABLE apps ADD COLUMN preview_port INTEGER`);
   } catch {
     // column already exists
   }
@@ -392,12 +422,15 @@ export function getSessionDisplayTitle(session: ChatSession): string {
 }
 
 export function listSessionsWithMeta(): ChatSession[] {
-  return listSessions().map((session) => ({
-    ...session,
-    messageCount: getSessionMessageCount(session.id),
-    preview: getSessionPreview(session.id),
-    displayTitle: getSessionDisplayTitle(session),
-  }));
+  const appChatIds = new Set(listApps().map((app) => app.sessionId));
+  return listSessions()
+    .filter((session) => !appChatIds.has(session.id))
+    .map((session) => ({
+      ...session,
+      messageCount: getSessionMessageCount(session.id),
+      preview: getSessionPreview(session.id),
+      displayTitle: getSessionDisplayTitle(session),
+    }));
 }
 
 export function findBestSessionForIdea(ideaId: string): string | null {
@@ -922,6 +955,7 @@ export function mergeIdeasInto(canonicalId: string, duplicateIds: string[]): voi
     database
       .prepare(`UPDATE sessions SET active_idea_id = ? WHERE active_idea_id = ?`)
       .run(canonicalId, dupId);
+    database.prepare(`UPDATE apps SET idea_id = ? WHERE idea_id = ?`).run(canonicalId, dupId);
 
     repointIdeaLinks(database, canonicalId, dupId);
 
@@ -981,4 +1015,154 @@ export function consolidateDuplicateSessionIdeas(): { sessionsFixed: number; ide
   }
 
   return { sessionsFixed, ideasMerged };
+}
+
+function rowToApp(row: Record<string, unknown>): AppRecord {
+  return {
+    id: row.id as string,
+    ideaId: (row.idea_id as string) || undefined,
+    sessionId: row.session_id as string,
+    sourceSessionId: (row.source_session_id as string) || undefined,
+    title: row.title as string,
+    objective: row.objective as string,
+    localPath: row.local_path as string,
+    githubRepo: row.github_repo as string,
+    getStarted: row.get_started as string,
+    ghStatus: (row.gh_status as string) || undefined,
+    previewUrl: (row.preview_url as string) || undefined,
+    previewPort: row.preview_port != null ? Number(row.preview_port) : undefined,
+    createdAt: row.created_at as string,
+    updatedAt: row.updated_at as string,
+  };
+}
+
+/** Old promote rows used the Ideas session as session_id. Give each app its own chat. */
+export function ensureAppChatSession(app: AppRecord): AppRecord {
+  if (app.sourceSessionId) return app;
+  const chat = createSession(app.title.slice(0, 60), "developer");
+  const now = new Date().toISOString();
+  getDb()
+    .prepare(`UPDATE apps SET source_session_id = ?, session_id = ?, updated_at = ? WHERE id = ?`)
+    .run(app.sessionId, chat.id, now, app.id);
+  return getApp(app.id)!;
+}
+
+export function listApps(): AppRecord[] {
+  const rows = getDb()
+    .prepare(`SELECT * FROM apps ORDER BY updated_at DESC`)
+    .all() as Record<string, unknown>[];
+  return rows.map((row) => ensureAppChatSession(rowToApp(row)));
+}
+
+export function getApp(id: string): AppRecord | null {
+  const row = getDb().prepare(`SELECT * FROM apps WHERE id = ?`).get(id) as
+    | Record<string, unknown>
+    | undefined;
+  return row ? rowToApp(row) : null;
+}
+
+export function getAppForIdea(ideaId: string): AppRecord | null {
+  const row = getDb()
+    .prepare(`SELECT * FROM apps WHERE idea_id = ? ORDER BY updated_at DESC LIMIT 1`)
+    .get(ideaId) as Record<string, unknown> | undefined;
+  return row ? rowToApp(row) : null;
+}
+
+/** Dedicated Apps-tab chat only (not the Ideas thread it was promoted from). */
+export function getAppForChatSession(sessionId: string): AppRecord | null {
+  const row = getDb()
+    .prepare(
+      `SELECT * FROM apps
+       WHERE session_id = ?
+         AND source_session_id IS NOT NULL
+         AND source_session_id != ''
+       ORDER BY updated_at DESC LIMIT 1`
+    )
+    .get(sessionId) as Record<string, unknown> | undefined;
+  return row ? rowToApp(row) : null;
+}
+
+export function getAppForSession(sessionId: string): AppRecord | null {
+  const row = getDb()
+    .prepare(
+      `SELECT * FROM apps
+       WHERE session_id = ? OR source_session_id = ?
+       ORDER BY updated_at DESC LIMIT 1`
+    )
+    .get(sessionId, sessionId) as Record<string, unknown> | undefined;
+  return row ? rowToApp(row) : null;
+}
+
+export function upsertApp(input: {
+  id?: string;
+  ideaId?: string;
+  sessionId: string;
+  sourceSessionId?: string;
+  title: string;
+  objective: string;
+  localPath: string;
+  githubRepo: string;
+  getStarted: string;
+  ghStatus?: string;
+}): AppRecord {
+  const now = new Date().toISOString();
+  const existing =
+    (input.id ? getApp(input.id) : null) ??
+    (input.ideaId ? getAppForIdea(input.ideaId) : null) ??
+    getAppForSession(input.sessionId);
+  const id = existing?.id ?? input.id ?? uuidv4();
+  const sourceSessionId = input.sourceSessionId ?? existing?.sourceSessionId ?? null;
+
+  if (existing || getApp(id)) {
+    getDb()
+      .prepare(
+        `UPDATE apps SET idea_id = ?, session_id = ?, source_session_id = ?, title = ?, objective = ?, local_path = ?, github_repo = ?, get_started = ?, gh_status = ?, updated_at = ? WHERE id = ?`
+      )
+      .run(
+        input.ideaId ?? existing?.ideaId ?? null,
+        input.sessionId,
+        sourceSessionId,
+        input.title,
+        input.objective,
+        input.localPath,
+        input.githubRepo,
+        input.getStarted,
+        input.ghStatus ?? null,
+        now,
+        id
+      );
+  } else {
+    getDb()
+      .prepare(
+        `INSERT INTO apps (id, idea_id, session_id, source_session_id, title, objective, local_path, github_repo, get_started, gh_status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        id,
+        input.ideaId ?? null,
+        input.sessionId,
+        sourceSessionId,
+        input.title,
+        input.objective,
+        input.localPath,
+        input.githubRepo,
+        input.getStarted,
+        input.ghStatus ?? null,
+        now,
+        now
+      );
+  }
+
+  return getApp(id)!;
+}
+
+export function updateAppPreview(
+  id: string,
+  preview: { previewUrl: string; previewPort: number }
+): AppRecord | null {
+  const now = new Date().toISOString();
+  getDb()
+    .prepare(`UPDATE apps SET preview_url = ?, preview_port = ?, updated_at = ? WHERE id = ?`)
+    .run(preview.previewUrl, preview.previewPort, now, id);
+  return getApp(id);
 }

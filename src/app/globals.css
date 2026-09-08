@@ -161,6 +161,21 @@ body {
   transform-origin: 16px 14px;
 }
 
+.agent-face--sally {
+  animation: agent-nod 3.5s ease-in-out infinite;
+}
+.agent-face--sally .agent-brush {
+  animation: agent-tilt 3s ease-in-out infinite;
+  transform-origin: 22px 12px;
+}
+
+.agent-face--amelia {
+  animation: agent-nod 3s ease-in-out infinite;
+}
+.agent-face--amelia .agent-chevron {
+  animation: agent-bounce 2.4s ease-in-out infinite;
+}
+
 .agent-face--party {
   animation: agent-wiggle 1.2s ease-in-out infinite;
 }

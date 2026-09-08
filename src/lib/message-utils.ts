@@ -83,6 +83,20 @@ Example: \`/john Turn this thread into an MVP and say if it should be web, mobil
 Example: \`/winston Propose stack and hosting for the plan John just outlined.\``;
   }
 
+  if (agentId === "ux-designer") {
+    const sally = getAgent("ux-designer");
+    return `Hey! I'm **${sally.name}**, ${sally.persona}. Tell me the job and the first screen and I'll sketch the flow.
+
+Example: \`/sally Design the empty state and the first-run path.\``;
+  }
+
+  if (agentId === "developer") {
+    const amelia = getAgent("developer");
+    return `Hey! I'm **${amelia.name}**, ${amelia.persona}. Point me at the folder charter and I'll start the MVP in that directory.
+
+Example: \`/amelia Read START.md and implement the first slice.\``;
+  }
+
   const level = getAgent("honesty-coach");
   return `Hey! I'm ready when you are. Describe an app idea, business concept, or problem you want to think through — try **/honesty** when you want ${level.name} to check your claims.`;
 }

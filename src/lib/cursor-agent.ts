@@ -8,7 +8,7 @@ import type { DeepReconResult } from "@/lib/web-research";
 import { getAgent } from "@/lib/bmad/agents";
 import type { BmadAgentId, DepthScore } from "@/lib/types";
 
-const CURSOR_TIMEOUT_MS = 45_000;
+const CURSOR_TIMEOUT_MS = 120_000;
 
 export interface AgentRunOptions {
   agentId: BmadAgentId;
@@ -150,19 +150,20 @@ async function* streamWithCursorSdk(
   const prompt = `${systemPrompt}${crossBlock}${historyBlock}\n\nUSER: ${options.message}${forgePrefix}\n\nRespond as the active BMAD agent. Use the required response format.`;
 
   const run = await agent.send(prompt);
-  const deadline = Date.now() + CURSOR_TIMEOUT_MS;
+  let idleDeadline = Date.now() + CURSOR_TIMEOUT_MS;
   let gotText = false;
 
   for await (const event of run.stream()) {
-    if (Date.now() > deadline) {
+    if (Date.now() > idleDeadline) {
       if (!gotText) {
         yield* streamFallbackResponse(
           options,
-          new Error("Cursor agent timed out after 45s")
+          new Error("Cursor agent timed out after 120s of inactivity")
         );
       }
       return;
     }
+    idleDeadline = Date.now() + CURSOR_TIMEOUT_MS;
     const text = extractTextFromEvent(event);
     if (text) {
       gotText = true;

@@ -10,6 +10,7 @@ import {
 } from "@/components/IdeaSidebar";
 import { ChatWindow } from "@/components/ChatWindow";
 import { IdeaMap } from "@/components/IdeaMap";
+import { cn } from "@/lib/utils";
 
 const INIT_TIMEOUT_MS = 15_000;
 
@@ -43,6 +44,18 @@ export default function HomePage() {
   const [tab, setTab] = useState<SidebarTab>("chat");
   const [graph, setGraph] = useState<IdeaGraph>({ nodes: [], edges: [] });
   const [thoughts, setThoughts] = useState<IdeaThought[]>([]);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [desktopNavCollapsed, setDesktopNavCollapsed] = useState(false);
+
+  const closeMobileNav = useCallback(() => setMobileNavOpen(false), []);
+  const openNav = useCallback(() => {
+    setMobileNavOpen(true);
+    setDesktopNavCollapsed(false);
+  }, []);
+  const collapseNav = useCallback(() => {
+    setMobileNavOpen(false);
+    setDesktopNavCollapsed(true);
+  }, []);
 
   const loadGraph = useCallback(async () => {
     const res = await fetchWithTimeout("/api/ideas?graph=1");
@@ -148,10 +161,29 @@ export default function HomePage() {
     init();
   }, [init]);
 
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeMobileNav();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mobileNavOpen, closeMobileNav]);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const onChange = () => {
+      if (mq.matches) closeMobileNav();
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [closeMobileNav]);
+
   const handleSelectSession = useCallback(
     async (id: string) => {
       storeSessionId(id);
       setSessionId(id);
+      closeMobileNav();
       // Show the whole conversation for the selected session, not just one
       // idea's thread, so nothing typed in this chat is hidden.
       setActiveIdeaId(undefined);
@@ -159,15 +191,18 @@ export default function HomePage() {
       setRelatedIdeas([]);
       await loadSidebar();
     },
-    [loadSidebar]
+    [loadSidebar, closeMobileNav]
   );
 
   const handleTabChange = useCallback(
     (next: SidebarTab) => {
       setTab(next);
-      if (next === "idea") void loadGraph();
+      if (next === "idea") {
+        void loadGraph();
+        closeMobileNav();
+      }
     },
-    [loadGraph]
+    [loadGraph, closeMobileNav]
   );
 
   const handleSelectIdea = useCallback(
@@ -180,9 +215,10 @@ export default function HomePage() {
         setSessionId(data.session.id);
       }
       setTab("chat");
+      closeMobileNav();
       await loadSidebar();
     },
-    [loadSidebar]
+    [loadSidebar, closeMobileNav]
   );
 
   const handleNewSession = useCallback(async () => {
@@ -198,8 +234,9 @@ export default function HomePage() {
     setActiveIdeaId(undefined);
     setIdeaDetail(null);
     setRelatedIdeas([]);
+    closeMobileNav();
     await loadSidebar();
-  }, [loadSidebar]);
+  }, [loadSidebar, closeMobileNav]);
 
   const handleClearIdea = useCallback(async () => {
     setActiveIdeaId(undefined);
@@ -269,32 +306,55 @@ export default function HomePage() {
   }
 
   return (
-    <main className="flex h-screen bg-zinc-950 text-zinc-100">
-      <div className="hidden w-72 shrink-0 md:block lg:w-80">
-        <IdeaSidebar
-          tab={tab}
-          onTabChange={handleTabChange}
-          groups={groups}
-          sessions={sessions}
-          linkCount={graph.edges.length}
-          activeIdeaId={activeIdeaId}
-          activeSessionId={sessionId}
-          ideaDetail={ideaDetail}
-          relatedIdeas={relatedIdeas}
-          onSelectIdea={handleSelectIdea}
-          onSelectSession={handleSelectSession}
-          onNewSession={handleNewSession}
-          onClearIdea={handleClearIdea}
-          onRenameSession={handleRenameSession}
-          onTogglePinIdea={handleTogglePinIdea}
+    <main className="flex h-screen overflow-hidden bg-zinc-950 text-zinc-100">
+      {mobileNavOpen && (
+        <button
+          type="button"
+          aria-label="Dismiss conversation menu"
+          className="fixed inset-0 z-30 bg-black/60 md:hidden"
+          onClick={closeMobileNav}
         />
+      )}
+      <div
+        id="app-nav"
+        className={cn(
+          "z-40 h-full w-[min(18rem,88vw)] shrink-0 lg:w-80",
+          mobileNavOpen
+            ? "fixed inset-y-0 left-0 flex h-dvh pb-[env(safe-area-inset-bottom)]"
+            : "hidden",
+          desktopNavCollapsed ? "md:hidden" : "md:static md:flex md:w-72"
+        )}
+      >
+        <div className="h-full w-full">
+          <IdeaSidebar
+            tab={tab}
+            onTabChange={handleTabChange}
+            groups={groups}
+            sessions={sessions}
+            linkCount={graph.edges.length}
+            activeIdeaId={activeIdeaId}
+            activeSessionId={sessionId}
+            ideaDetail={ideaDetail}
+            relatedIdeas={relatedIdeas}
+            onSelectIdea={handleSelectIdea}
+            onSelectSession={handleSelectSession}
+            onNewSession={handleNewSession}
+            onClearIdea={handleClearIdea}
+            onRenameSession={handleRenameSession}
+            onTogglePinIdea={handleTogglePinIdea}
+            onCloseMobile={collapseNav}
+          />
+        </div>
       </div>
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1" inert={mobileNavOpen ? true : undefined}>
         {tab === "idea" ? (
           <IdeaMap
             graph={graph}
             thoughts={thoughts}
             onSelectIdea={handleSelectIdea}
+            onOpenSidebar={openNav}
+            sidebarOpen={mobileNavOpen || !desktopNavCollapsed}
+            showSidebarToggleOnDesktop={desktopNavCollapsed}
           />
         ) : (
           <ChatWindow
@@ -306,6 +366,9 @@ export default function HomePage() {
             onSessionActivity={() => storeSessionId(sessionId)}
             onSessionUpdated={loadSidebar}
             onContinueSimilarChat={handleSelectSession}
+            onOpenSidebar={openNav}
+            sidebarOpen={mobileNavOpen || !desktopNavCollapsed}
+            showSidebarToggleOnDesktop={desktopNavCollapsed}
           />
         )}
       </div>

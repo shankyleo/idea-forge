@@ -5,7 +5,7 @@ import { Send, Sparkles, AlertCircle, Wand2 } from "lucide-react";
 import type { AgentInfo, BmadAgentId, ChatMessage, DepthScore, HonestyBreakdown, SimilarIdeaNudge } from "@/lib/types";
 import { HonestyBreakdownCard } from "@/components/HonestyBreakdownCard";
 import { DepthBadge } from "@/components/DepthBadge";
-import { RelatedIdeas } from "@/components/IdeaSidebar";
+import { NavToggleButton, RelatedIdeas } from "@/components/IdeaSidebar";
 import { getAgent } from "@/lib/bmad/agents";
 import { AgentIcon } from "@/components/AgentIcon";
 import { SLASH_COMMAND_HINTS, filterSlashCommandOptions, getSlashPickerQuery, parseSlashCommand } from "@/lib/slash-commands";
@@ -25,7 +25,8 @@ import {
 } from "@/components/AssistantMessage";
 import type { AgentPerspective } from "@/lib/types";
 
-const CHAT_TIMEOUT_MS = 90_000;
+const CHAT_TIMEOUT_MS = 180_000;
+const CHAT_IDLE_MS = 90_000;
 
 function groupIntoTurns(messages: ChatMessage[]): ChatTurn[] {
   const turns: ChatTurn[] = [];
@@ -114,6 +115,9 @@ interface ChatWindowProps {
   onSessionActivity?: () => void;
   onSessionUpdated?: () => void;
   onContinueSimilarChat?: (sessionId: string) => void;
+  onOpenSidebar?: () => void;
+  sidebarOpen?: boolean;
+  showSidebarToggleOnDesktop?: boolean;
 }
 
 export function ChatWindow({
@@ -124,6 +128,9 @@ export function ChatWindow({
   onSessionActivity,
   onSessionUpdated,
   onContinueSimilarChat,
+  onOpenSidebar,
+  sidebarOpen = false,
+  showSidebarToggleOnDesktop = false,
 }: ChatWindowProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [displayTitle, setDisplayTitle] = useState("New conversation");
@@ -255,7 +262,17 @@ export function ChatWindow({
     setMessages((prev) => [...prev, optimisticUser]);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), CHAT_TIMEOUT_MS);
+    const startedAt = Date.now();
+    let timeoutId = window.setTimeout(() => controller.abort(), CHAT_IDLE_MS);
+    const bumpIdleTimeout = () => {
+      window.clearTimeout(timeoutId);
+      const remaining = CHAT_TIMEOUT_MS - (Date.now() - startedAt);
+      if (remaining <= 0) {
+        controller.abort();
+        return;
+      }
+      timeoutId = window.setTimeout(() => controller.abort(), Math.min(CHAT_IDLE_MS, remaining));
+    };
 
     let routedAgent: BmadAgentId | null = null;
     let routeReason = "";
@@ -286,6 +303,7 @@ export function ChatWindow({
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        bumpIdleTimeout();
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n\n");
@@ -315,7 +333,6 @@ export function ChatWindow({
           } else if (payload.type === "meta") {
             assistantMsgId = (payload.assistantMessageId as string) ?? "";
             const userMessageId = (payload.userMessageId as string) ?? optimisticUser.id;
-            setStatusLine(null);
             if (!metaApplied) {
               setMessages((prev) =>
                 prev.map((m) =>
@@ -348,6 +365,7 @@ export function ChatWindow({
           } else if (payload.type === "chunk") {
             assistantContent += payload.content as string;
             setStreamingContent(assistantContent);
+            setStatusLine(null);
           } else if (payload.type === "done") {
             doneReceived = true;
             const finalGrounding = payload.honestyBreakdown as HonestyBreakdown | undefined;
@@ -407,7 +425,7 @@ export function ChatWindow({
           sessionId,
           role: "assistant",
           content: isTimeout
-            ? "Request timed out. Try a shorter message or check CURSOR_API_KEY if using live agents."
+            ? "That reply took too long. Try again — long threads can take a couple of minutes now."
             : "Something went wrong. Make sure the dev server is running (`npm run dev`) and try again.",
           createdAt: new Date().toISOString(),
         },
@@ -468,7 +486,14 @@ export function ChatWindow({
   return (
     <div className="flex h-full flex-col">
       <header className="border-b border-zinc-800 px-4 py-3">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start justify-between gap-3">
+          {onOpenSidebar && (
+            <NavToggleButton
+              onClick={onOpenSidebar}
+              open={sidebarOpen}
+              visibleOnDesktop={showSidebarToggleOnDesktop}
+            />
+          )}
           <div className="min-w-0 flex-1">
             <p className="mb-1 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
               <Sparkles className="h-3 w-3 text-amber-400" />
@@ -495,9 +520,13 @@ export function ChatWindow({
               <HonestyScoreBadge score={headerHonesty.score} delta={headerHonesty.delta} />
             )}
             {!cursorApiConfigured && (
-              <div className="flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-200">
+              <div
+                className="flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs text-amber-200 sm:px-2.5"
+                title="Add CURSOR_API_KEY for live agents"
+                aria-label="Add CURSOR_API_KEY for live agents"
+              >
                 <AlertCircle className="h-3.5 w-3.5" />
-                Add CURSOR_API_KEY for live agents
+                <span className="hidden sm:inline">Add CURSOR_API_KEY for live agents</span>
               </div>
             )}
           </div>

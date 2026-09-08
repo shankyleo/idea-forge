@@ -26,7 +26,7 @@ import type { DepthScore, HonestyBreakdown, AgentPerspective } from "@/lib/types
 import type { DeepReconResult } from "@/lib/web-research";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 180;
 
 function honestyContext(
   depthScore: DepthScore | undefined,
@@ -297,6 +297,10 @@ export async function POST(request: Request) {
             send({ type: "chunk", content: chunk + " " });
           }
         } else {
+          send({
+            type: "status",
+            message: `${getAgent(agentId).name} is writing...`,
+          });
           for await (const chunk of streamAgentResponse({
             agentId,
             message: workingMessage,

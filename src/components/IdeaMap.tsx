@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Lightbulb, Link2, Network, Sparkles } from "lucide-react";
 import type { IdeaGraph, IdeaGraphEdge, IdeaGraphNode, IdeaThought } from "@/lib/types";
+import { NavToggleButton } from "@/components/IdeaSidebar";
 import { cn } from "@/lib/utils";
 
 const WIDTH = 900;
@@ -154,9 +155,19 @@ interface IdeaMapProps {
   graph: IdeaGraph;
   thoughts?: IdeaThought[];
   onSelectIdea: (ideaId: string) => void;
+  onOpenSidebar?: () => void;
+  sidebarOpen?: boolean;
+  showSidebarToggleOnDesktop?: boolean;
 }
 
-export function IdeaMap({ graph, thoughts = [], onSelectIdea }: IdeaMapProps) {
+export function IdeaMap({
+  graph,
+  thoughts = [],
+  onSelectIdea,
+  onOpenSidebar,
+  sidebarOpen = false,
+  showSidebarToggleOnDesktop = false,
+}: IdeaMapProps) {
   const { nodes, edges } = graph;
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [hoveredEdge, setHoveredEdge] = useState<number | null>(null);
@@ -203,13 +214,29 @@ export function IdeaMap({ graph, thoughts = [], onSelectIdea }: IdeaMapProps) {
 
   if (nodes.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-        <Network className="h-10 w-10 text-zinc-700" />
-        <p className="text-sm font-medium text-zinc-300">No ideas to map yet</p>
-        <p className="max-w-sm text-xs text-zinc-500">
-          Describe products, feedback, or concepts in the chat. As ideas accumulate, this map
-          shows how they connect — related topics cluster together and links show why.
-        </p>
+      <div className="flex h-full flex-col">
+        {onOpenSidebar && (
+          <header
+            className={cn(
+              "border-b border-zinc-800 px-3 py-2",
+              !showSidebarToggleOnDesktop && "md:hidden"
+            )}
+          >
+            <NavToggleButton
+              onClick={onOpenSidebar}
+              open={sidebarOpen}
+              visibleOnDesktop={showSidebarToggleOnDesktop}
+            />
+          </header>
+        )}
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+          <Network className="h-10 w-10 text-zinc-700" />
+          <p className="text-sm font-medium text-zinc-300">No ideas to map yet</p>
+          <p className="max-w-sm text-xs text-zinc-500">
+            Describe products, feedback, or concepts in the chat. As ideas accumulate, this map
+            shows how they connect — related topics cluster together and links show why.
+          </p>
+        </div>
       </div>
     );
   }
@@ -217,14 +244,25 @@ export function IdeaMap({ graph, thoughts = [], onSelectIdea }: IdeaMapProps) {
   return (
     <div className="flex h-full flex-col">
       <header className="border-b border-zinc-800 px-4 py-3">
-        <h1 className="flex items-center gap-2 text-lg font-semibold text-white">
-          <Network className="h-5 w-5 text-amber-400" />
-          Idea Map
-        </h1>
-        <p className="flex items-center gap-1.5 text-xs text-zinc-500">
-          <Sparkles className="h-3 w-3" />
-          {nodes.length} ideas · {edges.length} connections · related topics share a color
-        </p>
+        <div className="flex items-start gap-2">
+          {onOpenSidebar && (
+            <NavToggleButton
+              onClick={onOpenSidebar}
+              open={sidebarOpen}
+              visibleOnDesktop={showSidebarToggleOnDesktop}
+            />
+          )}
+          <div className="min-w-0">
+            <h1 className="flex items-center gap-2 text-lg font-semibold text-white">
+              <Network className="h-5 w-5 text-amber-400" />
+              Idea Map
+            </h1>
+            <p className="flex items-center gap-1.5 text-xs text-zinc-500">
+              <Sparkles className="h-3 w-3" />
+              {nodes.length} ideas · {edges.length} connections · related topics share a color
+            </p>
+          </div>
+        </div>
       </header>
 
       <div className="relative flex-1 overflow-hidden">

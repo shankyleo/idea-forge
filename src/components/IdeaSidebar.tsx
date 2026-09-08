@@ -7,6 +7,8 @@ import {
   MessagesSquare,
   MessageSquarePlus,
   Network,
+  PanelLeft,
+  PanelLeftClose,
   Pin,
 } from "lucide-react";
 import type { ChatSession, IdeaGroup, IdeaRecord } from "@/lib/types";
@@ -43,6 +45,33 @@ interface IdeaSidebarProps {
   onClearIdea: () => void;
   onRenameSession?: (sessionId: string, title: string) => void | Promise<void>;
   onTogglePinIdea?: (ideaId: string, pinned: boolean) => void | Promise<void>;
+  onCloseMobile?: () => void;
+}
+
+export function NavToggleButton({
+  onClick,
+  open = false,
+  visibleOnDesktop = false,
+}: {
+  onClick: () => void;
+  open?: boolean;
+  visibleOnDesktop?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "mt-0.5 shrink-0 rounded-lg p-2 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100",
+        !visibleOnDesktop && "md:hidden"
+      )}
+      aria-label="Open conversations"
+      aria-expanded={open}
+      aria-controls="app-nav"
+    >
+      <PanelLeft className="h-5 w-5" />
+    </button>
+  );
 }
 
 function formatWhen(iso: string) {
@@ -71,6 +100,7 @@ export function IdeaSidebar({
   onClearIdea,
   onRenameSession,
   onTogglePinIdea,
+  onCloseMobile,
 }: IdeaSidebarProps) {
   const totalIdeas = groups.reduce((n, g) => n + g.ideas.length, 0);
   const allIdeas = groups.flatMap((g) => g.ideas);
@@ -187,9 +217,10 @@ export function IdeaSidebar({
   ];
 
   return (
-    <aside className="flex h-full flex-col border-r border-zinc-800 bg-zinc-950/80">
+    <aside className="flex h-full flex-col border-r border-zinc-800 bg-zinc-950">
       <div className="border-b border-zinc-800 px-3 py-3">
-        <div className="flex gap-1 rounded-lg bg-zinc-900/80 p-1">
+        <div className="flex items-center gap-2">
+          <div className="flex min-w-0 flex-1 gap-1 rounded-lg bg-zinc-900/80 p-1">
           {tabs.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -204,6 +235,17 @@ export function IdeaSidebar({
               {label}
             </button>
           ))}
+          </div>
+          {onCloseMobile && (
+            <button
+              type="button"
+              onClick={onCloseMobile}
+              className="shrink-0 rounded-lg p-2 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+              aria-label="Close conversations"
+            >
+              <PanelLeftClose className="h-5 w-5" />
+            </button>
+          )}
         </div>
       </div>
 

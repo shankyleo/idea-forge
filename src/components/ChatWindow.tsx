@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Send, Sparkles, AlertCircle, Wand2, FolderOpen, AppWindow } from "lucide-react";
+import { Send, Sparkles, AlertCircle, Wand2, FolderOpen, AppWindow, ExternalLink } from "lucide-react";
 import type { AgentInfo, AppRecord, BmadAgentId, ChatMessage, DepthScore, HonestyBreakdown, SimilarIdeaNudge } from "@/lib/types";
 import { HonestyBreakdownCard } from "@/components/HonestyBreakdownCard";
 import { DepthBadge } from "@/components/DepthBadge";
@@ -68,6 +68,7 @@ function AssistantBubble({
   existingApp,
   onPromote,
   onOpenApp,
+  previewUrl,
 }: {
   msg: ChatMessage;
   loading: boolean;
@@ -79,6 +80,7 @@ function AssistantBubble({
   existingApp?: boolean;
   onPromote?: (input: { localPath: string; githubRepo?: string }) => Promise<string | null>;
   onOpenApp?: () => void;
+  previewUrl?: string;
 }) {
   return (
     <div className="w-full rounded-2xl bg-zinc-800/60 px-4 py-3 ring-1 ring-zinc-700/50">
@@ -90,7 +92,7 @@ function AssistantBubble({
           slashCommand={slashCommand}
         />
       )}
-      <MarkdownContent content={msg.content} />
+      <MarkdownContent content={msg.content} previewUrl={previewUrl} />
       {msg.depthScore && (
         <div className="mt-3">
           <DepthBadge score={msg.depthScore} />
@@ -165,6 +167,7 @@ export function ChatWindow({
   const [linkedIdeaTitle, setLinkedIdeaTitle] = useState<string | null>(null);
   const [linkedIdeaId, setLinkedIdeaId] = useState<string | undefined>();
   const [existingApp, setExistingApp] = useState<AppRecord | null>(null);
+  const [livePreviewUrl, setLivePreviewUrl] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [statusLine, setStatusLine] = useState<string | null>(null);
@@ -192,6 +195,7 @@ export function ChatWindow({
   const slashPickerOpen = slashQuery !== null;
   const slashHints = workspace === "app" ? APP_SLASH_HINTS : SLASH_COMMAND_HINTS;
   const isAppWorkspace = workspace === "app";
+  const previewUrl = livePreviewUrl ?? app?.previewUrl ?? existingApp?.previewUrl;
 
   useEffect(() => {
     setSlashPickerIndex(0);
@@ -263,6 +267,25 @@ export function ChatWindow({
     },
     [sessionId, linkedIdeaId, onAppPromoted]
   );
+
+  const openAppPreview = useCallback(async () => {
+    if (!app?.id) return;
+    setStatusLine("Starting the app…");
+    const res = await fetch("/api/apps/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: app.id }),
+    });
+    const data = (await res.json()) as { url?: string; error?: string };
+    if (!res.ok || !data.url) {
+      setStatusLine(data.error || "Could not start the app");
+      return;
+    }
+    setLivePreviewUrl(data.url);
+    setStatusLine(null);
+    onSessionUpdated?.();
+    window.open(data.url, "_blank", "noopener,noreferrer");
+  }, [app?.id, onSessionUpdated]);
 
   useEffect(() => {
     loadMessages();
@@ -443,7 +466,12 @@ export function ChatWindow({
           } else if (payload.type === "chunk") {
             assistantContent += payload.content as string;
             setStreamingContent(assistantContent);
-            setStatusLine(null);
+          } else if (payload.type === "preview") {
+            const url = payload.url as string | undefined;
+            if (url) {
+              setLivePreviewUrl(url);
+              onSessionUpdated?.();
+            }
           } else if (payload.type === "done") {
             doneReceived = true;
             const finalGrounding = payload.honestyBreakdown as HonestyBreakdown | undefined;
@@ -624,6 +652,17 @@ export function ChatWindow({
                 Open idea chat
               </button>
             )}
+            {isAppWorkspace && app && (
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => void openAppPreview()}
+                className="mt-1 inline-flex items-center gap-1 text-[11px] text-indigo-400 hover:text-indigo-300 disabled:opacity-40"
+              >
+                <ExternalLink className="h-3 w-3" />
+                {previewUrl ? "Open app" : "Start app"}
+              </button>
+            )}
             <p className="mt-1 flex items-center gap-1.5 text-xs text-zinc-500">
               <Wand2 className="h-3 w-3" />
               {isAppWorkspace
@@ -632,6 +671,17 @@ export function ChatWindow({
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            {loading && streamingAgentId && (
+              <div
+                className="max-w-[11rem] animate-pulse truncate rounded-full border px-2.5 py-1 text-[11px] font-medium"
+                style={{
+                  borderColor: `${getAgent(streamingAgentId).color}55`,
+                  color: getAgent(streamingAgentId).color,
+                }}
+              >
+                {statusLine ?? `${getAgent(streamingAgentId).name} is working…`}
+              </div>
+            )}
             {!isAppWorkspace && headerHonesty && (
               <HonestyScoreBadge score={headerHonesty.score} delta={headerHonesty.delta} />
             )}
@@ -808,6 +858,7 @@ export function ChatWindow({
                     existingApp={Boolean(existingApp)}
                     onPromote={promoteApp}
                     onOpenApp={() => existingApp && onAppPromoted?.(existingApp)}
+                    previewUrl={previewUrl}
                   />
                 </div>
               );
@@ -855,10 +906,11 @@ export function ChatWindow({
                     existingApp={Boolean(existingApp)}
                     onPromote={promoteApp}
                     onOpenApp={() => existingApp && onAppPromoted?.(existingApp)}
+                    previewUrl={previewUrl}
                   />
                 )}
 
-                {isLiveTurn && streamingContent && streamingAgentId && (
+                {isLiveTurn && loading && streamingAgentId && (
                   <div className="w-full rounded-2xl bg-zinc-800/60 px-4 py-3 ring-1 ring-zinc-700/50">
                     <AgentReplyHeader
                       agentId={streamingAgentId}
@@ -866,7 +918,15 @@ export function ChatWindow({
                       invokedViaSlash={Boolean(slash)}
                       slashCommand={slash?.command}
                     />
-                    <MarkdownContent content={streamingContent} />
+                    {streamingContent ? (
+                      <MarkdownContent content={streamingContent} previewUrl={previewUrl} />
+                    ) : null}
+                    <p
+                      className="mt-3 animate-pulse text-sm"
+                      style={{ color: getAgent(streamingAgentId).color }}
+                    >
+                      {statusLine ?? `${getAgent(streamingAgentId).name} is working…`}
+                    </p>
                     {streamingForgeActions && (
                       <ForgeActionBar disabled={loading} onAction={(t) => void sendMessage(t)} />
                     )}
@@ -876,7 +936,7 @@ export function ChatWindow({
             );
           })}
 
-          {statusLine && (
+          {statusLine && !(loading && streamingAgentId) && (
             <div className="flex justify-center">
               <p className="animate-pulse text-sm text-indigo-300">{statusLine}</p>
             </div>

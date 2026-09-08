@@ -6,6 +6,7 @@ import type { AgentPerspective } from "@/lib/types";
 import { getAgent } from "@/lib/bmad/agents";
 import { AgentIcon } from "@/components/AgentIcon";
 import { cn } from "@/lib/utils";
+import { rewriteAppPreviewHref } from "@/lib/app-chat";
 
 const markdownComponents = {
   h1: ({ children }: { children?: React.ReactNode }) => (
@@ -76,10 +77,35 @@ const perspectiveMarkdownComponents = {
   ),
 };
 
-export function MarkdownContent({ content }: { content: string }) {
+export function MarkdownContent({
+  content,
+  previewUrl,
+}: {
+  content: string;
+  previewUrl?: string;
+}) {
+  const components = previewUrl
+    ? {
+        ...markdownComponents,
+        a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
+          const url = rewriteAppPreviewHref(href, previewUrl) ?? href;
+          return (
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-indigo-400 underline decoration-indigo-500/40 hover:text-indigo-300"
+            >
+              {children}
+            </a>
+          );
+        },
+      }
+    : markdownComponents;
+
   return (
     <div className="prose-invert max-w-none">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {content}
       </ReactMarkdown>
     </div>

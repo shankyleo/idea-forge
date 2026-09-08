@@ -318,7 +318,7 @@ export async function POST(request: Request) {
         } else {
           send({
             type: "status",
-            message: `${getAgent(agentId).name} is writing...`,
+            message: `${getAgent(agentId).name} is working…`,
           });
           for await (const chunk of streamAgentResponse({
             agentId,
@@ -336,9 +336,26 @@ export async function POST(request: Request) {
             workspaceCwd: appRecord?.localPath,
             localPath: appRecord?.localPath,
             githubRepo: appRecord?.githubRepo,
+            onStatus: (message) => send({ type: "status", message }),
           })) {
             fullResponse += chunk;
             send({ type: "chunk", content: chunk });
+          }
+        }
+
+        if (isAppChat && appRecord && agentId === "developer") {
+          send({ type: "status", message: `${getAgent("developer").name} is starting the app…` });
+          const { ensureAppPreview } = await import("@/lib/app-preview");
+          const preview = await ensureAppPreview(appRecord.id);
+          if ("url" in preview) {
+            const note = `\n\n**Open the app:** ${preview.url}\n${getAgent("developer").name} started it — you don't need to run \`npm run dev\`.`;
+            fullResponse += note;
+            send({ type: "chunk", content: note });
+            send({ type: "preview", url: preview.url, port: preview.port });
+          } else {
+            const note = `\n\nCould not start the preview (${preview.error}). ${getAgent("developer").name} should start the app in the folder and share a working URL.`;
+            fullResponse += note;
+            send({ type: "chunk", content: note });
           }
         }
 

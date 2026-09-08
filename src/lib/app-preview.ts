@@ -38,6 +38,17 @@ async function waitForPort(port: number, timeoutMs: number): Promise<boolean> {
   return isPortOpen(port);
 }
 
+function npmBin(): string {
+  for (const candidate of ["/usr/local/bin/npm", "/opt/homebrew/bin/npm"]) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return "npm";
+}
+
+function previewPath(): string {
+  return ["/usr/local/bin", "/opt/homebrew/bin", process.env.PATH || "/usr/bin:/bin"].join(":");
+}
+
 function hasDevScript(localPath: string): boolean {
   const pkgPath = path.join(localPath, "package.json");
   if (!fs.existsSync(pkgPath)) return false;
@@ -71,24 +82,26 @@ export async function ensureAppPreview(
 
   const nodeModules = path.join(app.localPath, "node_modules");
   if (!fs.existsSync(nodeModules)) {
-    spawnSync("npm", ["install"], {
+    spawnSync(npmBin(), ["install"], {
       cwd: app.localPath,
+      env: { ...process.env, PATH: previewPath() },
       encoding: "utf8",
       timeout: 180_000,
       stdio: "ignore",
     });
   }
 
-  const child = spawn(
-    "npm",
-    ["run", "dev", "--", "--port", String(port), "--host", "0.0.0.0"],
-    {
-      cwd: app.localPath,
-      env: { ...process.env, PORT: String(port), BROWSER: "none" },
-      detached: true,
-      stdio: "ignore",
-    }
-  );
+  const child = spawn(npmBin(), ["run", "dev", "--", "--port", String(port)], {
+    cwd: app.localPath,
+    env: {
+      ...process.env,
+      PATH: previewPath(),
+      PORT: String(port),
+      BROWSER: "none",
+    },
+    detached: true,
+    stdio: "ignore",
+  });
   child.unref();
 
   const ready = await waitForPort(port, 60_000);

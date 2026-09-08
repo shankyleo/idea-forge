@@ -26,7 +26,7 @@ import type { DepthScore, HonestyBreakdown, AgentPerspective } from "@/lib/types
 import type { DeepReconResult } from "@/lib/web-research";
 
 export const runtime = "nodejs";
-export const maxDuration = 180;
+export const maxDuration = 300;
 
 function honestyContext(
   depthScore: DepthScore | undefined,
@@ -189,9 +189,16 @@ export async function POST(request: Request) {
 
   const stream = new ReadableStream({
     async start(controller) {
+      let closed = false;
       const send = (payload: Record<string, unknown>) => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+        } catch {
+          closed = true;
+        }
       };
+      const heartbeat = setInterval(() => send({ type: "ping" }), 8_000);
 
       send({
         type: "routing",
@@ -376,6 +383,8 @@ export async function POST(request: Request) {
           message: error instanceof Error ? error.message : "Stream failed",
         });
       } finally {
+        clearInterval(heartbeat);
+        closed = true;
         controller.close();
       }
     },
@@ -384,8 +393,9 @@ export async function POST(request: Request) {
   return new Response(stream, {
     headers: {
       "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
+      "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
     },
   });
 }

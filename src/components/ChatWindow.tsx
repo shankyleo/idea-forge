@@ -25,8 +25,8 @@ import {
 } from "@/components/AssistantMessage";
 import type { AgentPerspective } from "@/lib/types";
 
-const CHAT_TIMEOUT_MS = 180_000;
-const CHAT_IDLE_MS = 90_000;
+const CHAT_TIMEOUT_MS = 300_000;
+const CHAT_IDLE_MS = 180_000;
 
 function groupIntoTurns(messages: ChatMessage[]): ChatTurn[] {
   const turns: ChatTurn[] = [];
@@ -312,6 +312,7 @@ export function ChatWindow({
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
           const payload = JSON.parse(line.slice(6)) as Record<string, unknown>;
+          if (payload.type === "ping") continue;
 
           if (payload.type === "routing") {
             routedAgent = payload.agentId as BmadAgentId;
@@ -425,7 +426,7 @@ export function ChatWindow({
           sessionId,
           role: "assistant",
           content: isTimeout
-            ? "That reply took too long. Try again — long threads can take a couple of minutes now."
+            ? "Still waiting on the agent — the connection dropped. Send the message again."
             : "Something went wrong. Make sure the dev server is running (`npm run dev`) and try again.",
           createdAt: new Date().toISOString(),
         },

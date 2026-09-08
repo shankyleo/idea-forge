@@ -8,7 +8,21 @@ import type { DeepReconResult } from "@/lib/web-research";
 import { getAgent } from "@/lib/bmad/agents";
 import type { BmadAgentId, DepthScore } from "@/lib/types";
 
-const CURSOR_TIMEOUT_MS = 120_000;
+const CURSOR_TIMEOUT_MS = 180_000;
+const HISTORY_MAX_MESSAGES = 8;
+const HISTORY_MAX_CHARS = 1_800;
+
+function compactHistory(
+  history: Array<{ role: "user" | "assistant"; content: string }>
+): Array<{ role: "user" | "assistant"; content: string }> {
+  return history.slice(-HISTORY_MAX_MESSAGES).map((m) => ({
+    role: m.role,
+    content:
+      m.content.length > HISTORY_MAX_CHARS
+        ? `${m.content.slice(0, HISTORY_MAX_CHARS)}\n…[truncated]`
+        : m.content,
+  }));
+}
 
 export interface AgentRunOptions {
   agentId: BmadAgentId;
@@ -61,7 +75,7 @@ export async function runAgentOnce(
 
   const historyBlock =
     options.history.length > 0
-      ? `\n\n## Conversation so far\n${options.history
+      ? `\n\n## Conversation so far\n${compactHistory(options.history)
           .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
           .join("\n\n")}`
       : "";
@@ -125,7 +139,7 @@ async function* streamWithCursorSdk(
 
   const historyBlock =
     options.history.length > 0
-      ? `\n\n## Conversation so far\n${options.history
+      ? `\n\n## Conversation so far\n${compactHistory(options.history)
           .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
           .join("\n\n")}`
       : "";
